@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 websockets==12.0
@@ -7,3 +8,7 @@ python-dotenv==1.0.0
 aiofiles==23.2.1
 httpx==0.25.2
 python-magic==0.4.27 
+=======
+rapidfuzz
+openai
+>>>>>>> 7a1679b4dac17f5de4d5e0ed30edbc5529d89d1d
