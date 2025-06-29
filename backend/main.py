@@ -9,6 +9,9 @@ import os
 import aiofiles
 from pathlib import Path
 import re
+import asyncio
+from collections import defaultdict
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +32,18 @@ app.add_middleware(
 BANIDB_API_BASE_URL = "https://api.banidb.com/v2"
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
+
+# Create a shared HTTP client with connection pooling for better performance
+http_client = httpx.AsyncClient(
+    timeout=httpx.Timeout(10.0, connect=5.0),  # Reduced timeout
+    limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
+    http2=True  # Enable HTTP/2 for better performance
+)
+
+# Debouncing mechanism to avoid too many API calls
+search_cache = {}
+last_search_time = defaultdict(float)
+DEBOUNCE_DELAY = 0.5  # 500ms debounce delay
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -90,7 +105,7 @@ def strip_gurmukhi_matras(text: str) -> str:
     return text
 
 async def search_banidb_api(query: str, source: str = "all") -> List[dict]:
-    """Search BaniDB API for Gurbani text"""
+    """Search BaniDB API for Gurbani text with caching and debouncing"""
     if not query.strip():
         return []
     
@@ -101,46 +116,73 @@ async def search_banidb_api(query: str, source: str = "all") -> List[dict]:
     if not stripped_query:
         return []
     
+    # Check cache first
+    cache_key = f"{stripped_query}_{source}"
+    if cache_key in search_cache:
+        logger.info(f"Cache hit for query: '{stripped_query}'")
+        return search_cache[cache_key]
+    
+    # Debouncing: skip if too soon after last search
+    current_time = time.time()
+    if current_time - last_search_time[stripped_query] < DEBOUNCE_DELAY:
+        logger.info(f"Debouncing search for: '{stripped_query}'")
+        return []
+    
+    last_search_time[stripped_query] = current_time
+    
     try:
-        async with httpx.AsyncClient() as client:
-            # Use the correct BaniDB API endpoint structure
-            search_url = f"{BANIDB_API_BASE_URL}/search/{stripped_query}"
-            params = {
-                "source": source,
-                "searchtype": "6",
-                "writer": "all",
-                "page": "1",
-                "livesearch": "1"
-            }
-            
-            response = await client.get(search_url, params=params, timeout=30.0)
-            response.raise_for_status()
-            
-            data = response.json()
-            results = []
-            
-            # The API returns "verses" not "results"
-            if "verses" in data:
-                for verse in data["verses"][:10]:  # Limit to 10 results
-                    results.append({
-                        "gurmukhi_text": verse.get("verse", {}).get("unicode", ""),
-                        "english_translation": verse.get("translation", {}).get("en", {}).get("bdb", ""),
-                        "verse_id": verse.get("verseId", 0),
-                        "shabad_id": verse.get("shabadId", 0),
-                        "source": "Guru Granth Sahib",  # Default source
-                        "writer": "Guru Nanak Dev Ji",  # Default writer
-                        "raag": ""  # Will be populated if available
-                    })
-            
-            logger.info(f"BaniDB search returned {len(results)} results for query: '{stripped_query}'")
-            return results
-            
+        # Use the shared HTTP client for better performance
+        search_url = f"{BANIDB_API_BASE_URL}/search/{stripped_query}"
+        params = {
+            "source": source,
+            "searchtype": "6",
+            "writer": "all",
+            "page": "1",
+            "livesearch": "1"
+        }
+        
+        response = await http_client.get(search_url, params=params)
+        response.raise_for_status()
+        
+        data = response.json()
+        results = []
+        
+        # The API returns "verses" not "results"
+        if "verses" in data:
+            for verse in data["verses"][:10]:  # Limit to 10 results
+                results.append({
+                    "gurmukhi_text": verse.get("verse", {}).get("unicode", ""),
+                    "english_translation": verse.get("translation", {}).get("en", {}).get("bdb", ""),
+                    "verse_id": verse.get("verseId", 0),
+                    "shabad_id": verse.get("shabadId", 0),
+                    "source": "Guru Granth Sahib",  # Default source
+                    "writer": "Guru Nanak Dev Ji",  # Default writer
+                    "raag": ""  # Will be populated if available
+                })
+        
+        # Cache the results for 5 minutes
+        search_cache[cache_key] = results
+        logger.info(f"BaniDB search returned {len(results)} results for query: '{stripped_query}'")
+        return results
+        
     except httpx.RequestError as e:
         logger.error(f"BaniDB API request error: {e}")
         return []
     except Exception as e:
         logger.error(f"BaniDB API error: {e}")
         return []
+
+# Clean up cache periodically
+async def cleanup_cache():
+    """Clean up old cache entries every 5 minutes"""
+    while True:
+        await asyncio.sleep(300)  # 5 minutes
+        current_time = time.time()
+        # Keep only recent cache entries (last 10 minutes)
+        old_keys = [k for k, v in search_cache.items() if current_time - v.get('_timestamp', 0) > 600]
+        for key in old_keys:
+            del search_cache[key]
+        logger.info(f"Cleaned up {len(old_keys)} old cache entries")
 
 @app.get("/")
 async def root():
@@ -203,15 +245,16 @@ async def websocket_endpoint(websocket: WebSocket):
             
             logger.info(f"Received transcription: {transcribed_text} (confidence: {confidence})")
             
-            # Search in BaniDB API
+            # Search in BaniDB API with optimized function
             search_results = await search_banidb_api(transcribed_text)
             
-            # Send results back to client
+            # Send results back to client immediately
             response = {
                 "type": "search_result",
                 "transcribed_text": transcribed_text,
                 "confidence": confidence,
-                "results": search_results
+                "results": search_results,
+                "timestamp": time.time()
             }
             
             await manager.send_personal_message(json.dumps(response), websocket)
@@ -250,4 +293,9 @@ async def strip_matras_endpoint(text: str):
 
 if __name__ == "__main__":
     import uvicorn
+    
+    # Start cache cleanup task
+    loop = asyncio.get_event_loop()
+    loop.create_task(cleanup_cache())
+    
     uvicorn.run(app, host="0.0.0.0", port=8000) 

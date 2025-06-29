@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './App.css';
 import TranscriptionPanel from './components/TranscriptionPanel';
 import SearchResults from './components/SearchResults';
@@ -31,6 +31,33 @@ function App() {
   
   const websocketRef = useRef<WebSocket | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSentTextRef = useRef<string>('');
+
+  // Debounced function to send transcription data
+  const debouncedSendTranscription = useCallback((text: string, confidence: number) => {
+    // Clear existing timeout
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
+    }
+
+    // Don't send if it's the same as last sent text
+    if (text === lastSentTextRef.current) {
+      return;
+    }
+
+    // Set new timeout
+    debounceTimeoutRef.current = setTimeout(() => {
+      if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+        const transcriptionData: TranscriptionData = {
+          text: text,
+          confidence: confidence
+        };
+        websocketRef.current.send(JSON.stringify(transcriptionData));
+        lastSentTextRef.current = text;
+      }
+    }, 300); // 300ms debounce delay
+  }, []);
 
   // Initialize WebSocket connection
   useEffect(() => {
@@ -76,6 +103,9 @@ function App() {
       if (websocketRef.current) {
         websocketRef.current.close();
       }
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -97,6 +127,7 @@ function App() {
       recognition.onresult = (event) => {
         let finalTranscript = '';
         let interimTranscript = '';
+        let maxConfidence = 0;
         
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const transcript = event.results[i][0].transcript;
@@ -104,21 +135,19 @@ function App() {
           
           if (event.results[i].isFinal) {
             finalTranscript += transcript;
-            
-            // Send to WebSocket for processing
-            if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-              const transcriptionData: TranscriptionData = {
-                text: transcript,
-                confidence: confidence
-              };
-              websocketRef.current.send(JSON.stringify(transcriptionData));
-            }
+            maxConfidence = Math.max(maxConfidence, confidence);
           } else {
             interimTranscript += transcript;
           }
         }
         
-        setTranscribedText(finalTranscript + interimTranscript);
+        const fullTranscript = finalTranscript + interimTranscript;
+        setTranscribedText(fullTranscript);
+        
+        // Only send final results to reduce API calls
+        if (finalTranscript.trim()) {
+          debouncedSendTranscription(finalTranscript.trim(), maxConfidence);
+        }
       };
       
       recognition.onerror = (event) => {
@@ -136,7 +165,7 @@ function App() {
     } else {
       setError('Speech recognition not supported in this browser');
     }
-  }, []);
+  }, [debouncedSendTranscription]);
 
   const startListening = () => {
     if (recognitionRef.current) {
