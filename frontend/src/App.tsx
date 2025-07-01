@@ -232,7 +232,7 @@ function App() {
   return (
     <div className="App">
       <header className="App-header">
-        <h1>🕉️ Bani AI</h1>
+        <h1>ੴ Bani AI</h1>
         <p>Real-time Punjabi Audio Transcription & BaniDB Search</p>
         
         <div className="connection-status">

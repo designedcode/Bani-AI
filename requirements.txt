@@ -5,3 +5,5 @@ python-multipart==0.0.6
 pydantic==2.5.0
 aiofiles==23.2.1
 httpx==0.25.2
+h2
+rapidfuzz==3.6.1
