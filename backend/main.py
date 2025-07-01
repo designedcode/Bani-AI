@@ -51,7 +51,7 @@ DEBOUNCE_DELAY = 0.5  # 500ms debounce delay
 SGGS_PATH = Path("backend/uploads/SGGS.txt")
 SGGS_LINES = []
 SGGS_LOADED = False
-FUZZY_THRESHOLD = float(os.getenv("FUZZY_MATCH_THRESHOLD", "55"))
+FUZZY_THRESHOLD = float(os.getenv("FUZZY_MATCH_THRESHOLD", "40"))
 
 # Load SGGS.txt into memory on startup
 if SGGS_PATH.exists():

@@ -43,7 +43,7 @@ echo ""
 # Start backend in background
 echo "🔧 Starting backend server on http://localhost:8000"
 cd backend
-python main.py &
+python3 -m uvicorn main:app --reload --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 cd ..
 
