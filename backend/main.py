@@ -48,7 +48,7 @@ last_search_time = defaultdict(float)
 DEBOUNCE_DELAY = 0.5  # 500ms debounce delay
 
 # --- SGGS.txt Fuzzy Search Setup ---
-SGGS_PATH = Path("backend/uploads/SGGS.txt")
+SGGS_PATH = Path(__file__).parent / "uploads" / "SGGS.txt"
 SGGS_LINES = []
 SGGS_LOADED = False
 FUZZY_THRESHOLD = float(os.getenv("FUZZY_MATCH_THRESHOLD", "40"))
@@ -65,7 +65,9 @@ else:
 from rapidfuzz import fuzz
 
 def fuzzy_search_sggs(query: str, threshold: float = FUZZY_THRESHOLD):
+    print(f"DEBUG: SGGS_LOADED={SGGS_LOADED}, query='{query}'")
     if not SGGS_LOADED or not query.strip():
+        print("DEBUG: Not loaded or empty query")
         return []
     best_score = -1
     best_line = None
@@ -74,6 +76,7 @@ def fuzzy_search_sggs(query: str, threshold: float = FUZZY_THRESHOLD):
         if score > best_score:
             best_score = score
             best_line = line
+    print(f"DEBUG: Best score={best_score}, Best line='{best_line}'")
     if best_score >= threshold:
         return [(best_line, best_score)]
     else:
@@ -345,11 +348,18 @@ async def websocket_endpoint(websocket: WebSocket):
             # Step 1: Fuzzy search SGGS.txt
             fuzzy_matches = fuzzy_search_sggs(transcribed_text, FUZZY_THRESHOLD)
             logger.info(f"Fuzzy search threshold: {FUZZY_THRESHOLD}")
+            sggs_match_found = False
+            fallback_used = False
+            best_sggs_match = None
+            best_sggs_score = None
             if fuzzy_matches:
                 matched_line, score = fuzzy_matches[0]
+                best_sggs_match = matched_line
+                best_sggs_score = score
                 logger.info(f"Best fuzzy match: Score={score}, Line='{matched_line}'")
                 logger.info(f"Transcription: '{transcribed_text}' | Best SGGS line: '{matched_line}'")
                 if score >= FUZZY_THRESHOLD:
+                    sggs_match_found = True
                     if matched_line is not None:
                         # Remove trailing '॥...॥' (delimiters and number) if present
                         verse = matched_line
@@ -360,15 +370,16 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.info(f"Stripped verse for BaniDB search: '{stripped_verse}' (from: '{verse}')")
                         # Search BaniDB with searchtype=6 first
                         search_results = await search_banidb_api(stripped_verse)
-                        
                         # If no results found, fallback to first letter search with searchtype=1
                         if not search_results:
+                            fallback_used = True
                             logger.info(f"No results with searchtype=6, falling back to first letter search for: '{stripped_verse}'")
                             fallback_first_letters = get_first_letters_search(verse)  # Use original verse, not stripped
                             logger.info(f"Fallback first letters: '{fallback_first_letters}'")
                             search_results = await search_banidb_api(fallback_first_letters, source="all", searchtype="1")
                     else:
                         logger.warning("No valid matched line found for fuzzy search.")
+                        fallback_used = True
                         # Fallback: strip matras, use first letter logic, searchtype=1
                         fallback_stripped = strip_gurmukhi_matras(transcribed_text)
                         fallback_first_letters = get_first_letters_search(transcribed_text)
@@ -376,6 +387,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         search_results = await search_banidb_api(fallback_first_letters, source="all", searchtype="1")
                 else:
                     logger.info(f"Best match below threshold ({FUZZY_THRESHOLD}). No match used.")
+                    fallback_used = True
                     # Fallback: strip matras, use first letter logic, searchtype=1
                     fallback_stripped = strip_gurmukhi_matras(transcribed_text)
                     fallback_first_letters = get_first_letters_search(transcribed_text)
@@ -383,6 +395,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     search_results = await search_banidb_api(fallback_first_letters, source="all", searchtype="1")
             else:
                 logger.info("No fuzzy matches found at all.")
+                fallback_used = True
                 # Fallback: strip matras, use first letter logic, searchtype=1
                 fallback_stripped = strip_gurmukhi_matras(transcribed_text)
                 fallback_first_letters = get_first_letters_search(transcribed_text)
@@ -395,7 +408,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 "transcribed_text": transcribed_text,
                 "confidence": confidence,
                 "results": search_results,
-                "timestamp": time.time()
+                "timestamp": time.time(),
+                "sggs_match_found": sggs_match_found,
+                "fallback_used": fallback_used,
+                "best_sggs_match": best_sggs_match,
+                "best_sggs_score": best_sggs_score
             }
             await manager.send_personal_message(json.dumps(response), websocket)
     except WebSocketDisconnect:

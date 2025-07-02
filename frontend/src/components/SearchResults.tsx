@@ -11,9 +11,13 @@ interface SearchResult {
 interface SearchResultsProps {
   results: SearchResult[];
   transcribedText: string;
+  sggsMatchFound?: boolean | null;
+  fallbackUsed?: boolean | null;
+  bestSggsMatch?: string | null;
+  bestSggsScore?: number | null;
 }
 
-const SearchResults: React.FC<SearchResultsProps> = ({ results, transcribedText }) => {
+const SearchResults: React.FC<SearchResultsProps> = ({ results, transcribedText, sggsMatchFound, fallbackUsed, bestSggsMatch, bestSggsScore }) => {
   return (
     <div className="search-results">
       <div className="panel-header">
@@ -21,6 +25,19 @@ const SearchResults: React.FC<SearchResultsProps> = ({ results, transcribedText 
         {transcribedText && (
           <div className="search-query">
             Query: <span className="query-text gurmukhi-text">{transcribedText}</span>
+          </div>
+        )}
+        {(sggsMatchFound !== null || fallbackUsed !== null) && (
+          <div className="sggs-indicators">
+            {sggsMatchFound === true && <span className="sggs-match-found">✅ Found in SGGS</span>}
+            {sggsMatchFound === false && <span className="sggs-match-not-found">❌ Not found in SGGS</span>}
+            {fallbackUsed === true && <span className="fallback-used">⚠️ Fallback search used</span>}
+          </div>
+        )}
+        {bestSggsMatch && (
+          <div className="best-sggs-match">
+            <span>Best SGGS Match: <span className="gurmukhi-text">{bestSggsMatch}</span></span>
+            {bestSggsScore !== null && bestSggsScore !== undefined && <span> (Score: {bestSggsScore.toFixed(1)})</span>}
           </div>
         )}
       </div>

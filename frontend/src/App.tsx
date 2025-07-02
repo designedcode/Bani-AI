@@ -28,6 +28,10 @@ function App() {
   const [error, setError] = useState<string>('');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<string>('');
+  const [sggsMatchFound, setSggsMatchFound] = useState<boolean | null>(null);
+  const [fallbackUsed, setFallbackUsed] = useState<boolean | null>(null);
+  const [bestSggsMatch, setBestSggsMatch] = useState<string | null>(null);
+  const [bestSggsScore, setBestSggsScore] = useState<number | null>(null);
   
   const websocketRef = useRef<WebSocket | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -77,6 +81,10 @@ function App() {
           const data = JSON.parse(event.data);
           if (data.type === 'search_result') {
             setSearchResults(data.results);
+            setSggsMatchFound(data.sggs_match_found ?? null);
+            setFallbackUsed(data.fallback_used ?? null);
+            setBestSggsMatch(data.best_sggs_match ?? null);
+            setBestSggsScore(data.best_sggs_score ?? null);
           }
         } catch (err) {
           console.error('Error parsing WebSocket message:', err);
@@ -299,6 +307,10 @@ function App() {
             <SearchResults 
               results={searchResults}
               transcribedText={transcribedText}
+              sggsMatchFound={sggsMatchFound}
+              fallbackUsed={fallbackUsed}
+              bestSggsMatch={bestSggsMatch}
+              bestSggsScore={bestSggsScore}
             />
           </div>
         </div>
