@@ -3,7 +3,7 @@ import './App.css';
 import TranscriptionPanel from './components/TranscriptionPanel';
 import SearchResults from './components/SearchResults';
 import AudioVisualizer from './components/AudioVisualizer';
-import FileUpload from './components/FileUpload';
+import FullShabadDisplay from './components/FullShabadDisplay';
 
 interface SearchResult {
   gurmukhi_text: string;
@@ -13,6 +13,7 @@ interface SearchResult {
   source?: string;
   writer?: string;
   raag?: string;
+  shabad_id: string;
 }
 
 interface TranscriptionData {
@@ -26,12 +27,19 @@ function App() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
   const [error, setError] = useState<string>('');
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadedFile, setUploadedFile] = useState<string>('');
   const [sggsMatchFound, setSggsMatchFound] = useState<boolean | null>(null);
   const [fallbackUsed, setFallbackUsed] = useState<boolean | null>(null);
   const [bestSggsMatch, setBestSggsMatch] = useState<string | null>(null);
   const [bestSggsScore, setBestSggsScore] = useState<number | null>(null);
+  const [fullShabad, setFullShabad] = useState<any>(null);
+  const [searchTriggered, setSearchTriggered] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState('');
+  const [lastSearchQuery, setLastSearchQuery] = useState('');
+  const [lastSearchResults, setLastSearchResults] = useState<SearchResult[]>([]);
+  const [lastSggsMatchFound, setLastSggsMatchFound] = useState<boolean | null>(null);
+  const [lastFallbackUsed, setLastFallbackUsed] = useState<boolean | null>(null);
+  const [lastBestSggsMatch, setLastBestSggsMatch] = useState<string | null>(null);
+  const [lastBestSggsScore, setLastBestSggsScore] = useState<number | null>(null);
   
   const websocketRef = useRef<WebSocket | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -52,6 +60,7 @@ function App() {
 
     // Set new timeout
     debounceTimeoutRef.current = setTimeout(() => {
+      if (fullShabad || searchTriggered) return;
       if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
         const transcriptionData: TranscriptionData = {
           text: text,
@@ -61,7 +70,14 @@ function App() {
         lastSentTextRef.current = text;
       }
     }, 300); // 300ms debounce delay
-  }, []);
+  }, [fullShabad, searchTriggered]);
+
+  // Fix: Clear debounce timer when fullShabad is set
+  useEffect(() => {
+    if (fullShabad && debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
+    }
+  }, [fullShabad]);
 
   // Initialize WebSocket connection
   useEffect(() => {
@@ -85,6 +101,29 @@ function App() {
             setFallbackUsed(data.fallback_used ?? null);
             setBestSggsMatch(data.best_sggs_match ?? null);
             setBestSggsScore(data.best_sggs_score ?? null);
+            // Only update last* states if results are present (i.e., a search actually happened)
+            if (data.results && data.results.length > 0) {
+              setLastSearchQuery(data.transcribed_text);
+              setLastSearchResults(data.results);
+              setLastSggsMatchFound(data.sggs_match_found ?? null);
+              setLastFallbackUsed(data.fallback_used ?? null);
+              setLastBestSggsMatch(data.best_sggs_match ?? null);
+              setLastBestSggsScore(data.best_sggs_score ?? null);
+            }
+            // Only fetch full shabad if not already loaded
+            if (!fullShabad && data.results && data.results.length > 0 && data.results[0].shabad_id) {
+              fetch(`/api/full-shabad?shabadId=${data.results[0].shabad_id}`)
+                .then(res => res.json())
+                .then(data => {
+                  setFullShabad(data);
+                  if (data && data.lines_highlighted && data.lines_highlighted.length > 0) {
+                    setSearchTriggered(true);
+                  }
+                })
+                .catch(() => setFullShabad(null));
+            } else if (!data.results || data.results.length === 0) {
+              setFullShabad(null);
+            }
           }
         } catch (err) {
           console.error('Error parsing WebSocket message:', err);
@@ -120,60 +159,70 @@ function App() {
   // Initialize speech recognition
   useEffect(() => {
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      // Clean up previous recognition instance only on unmount
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       const recognition = new SpeechRecognition();
-      
       recognition.continuous = true;
       recognition.interimResults = true;
       recognition.lang = 'pa-IN'; // Punjabi (India)
-      
       recognition.onstart = () => {
         console.log('Speech recognition started');
         setIsListening(true);
       };
-      
       recognition.onresult = (event) => {
-        let finalTranscript = '';
-        let interimTranscript = '';
+        let newTranscript = '';
+        let interim = '';
         let maxConfidence = 0;
-        
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const transcript = event.results[i][0].transcript;
           const confidence = event.results[i][0].confidence;
-          
           if (event.results[i].isFinal) {
-            finalTranscript += transcript;
+            newTranscript += transcript;
             maxConfidence = Math.max(maxConfidence, confidence);
           } else {
-            interimTranscript += transcript;
+            interim += transcript;
           }
         }
-        
-        const fullTranscript = finalTranscript + interimTranscript;
-        setTranscribedText(fullTranscript);
-        
-        // Only send final results to reduce API calls
-        if (finalTranscript.trim()) {
-          debouncedSendTranscription(finalTranscript.trim(), maxConfidence);
-        }
+        setTranscribedText(prev => {
+          const updated = prev + newTranscript;
+          const fullTranscript = (updated + interim).trim();
+          const wordCount = fullTranscript.split(/\s+/).length;
+          if (wordCount >= 8 && !fullShabad) {
+            const first8 = fullTranscript.split(/\s+/).slice(0,8).join(' ');
+            debouncedSendTranscription(first8, maxConfidence);
+          }
+          return updated;
+        });
+        setInterimTranscript(interim);
       };
-      
       recognition.onerror = (event) => {
         console.error('Speech recognition error:', event.error);
-        setError(`Speech recognition error: ${event.error}`);
+        // Only show error if it's not an intentional abort
+        if (event.error !== 'aborted') {
+          setError(`Speech recognition error: ${event.error}`);
+        } else {
+          setError(''); // Clear error for abort
+        }
         setIsListening(false);
       };
-      
       recognition.onend = () => {
         console.log('Speech recognition ended');
         setIsListening(false);
       };
-      
       recognitionRef.current = recognition;
     } else {
       setError('Speech recognition not supported in this browser');
     }
-  }, [debouncedSendTranscription]);
+    // Cleanup only on unmount
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+    };
+  }, []); // Only run once on mount/unmount
 
   const startListening = () => {
     if (recognitionRef.current) {
@@ -186,55 +235,23 @@ function App() {
     }
   };
 
-  const stopListening = () => {
+  const pauseListening = () => {
     if (recognitionRef.current) {
-      recognitionRef.current.stop();
+      recognitionRef.current.abort(); // Use abort to forcefully stop and release mic
     }
+    setIsListening(false);
   };
 
-  const clearText = () => {
+  const stopListeningAndClear = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.abort(); // Use abort to forcefully stop and release mic
+    }
+    setIsListening(false);
     setTranscribedText('');
+    setInterimTranscript('');
     setSearchResults([]);
-    setUploadedFile('');
-  };
-
-  const handleFileUpload = async (file: File) => {
-    setIsUploading(true);
-    setError('');
-    
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      
-      const response = await fetch('/api/upload-audio', {
-        method: 'POST',
-        body: formData,
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Upload failed: ${response.statusText}`);
-      }
-      
-      const result = await response.json();
-      setUploadedFile(file.name);
-      
-      // For MVP, we'll use a placeholder transcription
-      // In production, this would be the actual transcription from the service
-      const placeholderText = "ਜਪੁਜੀ ਸਾਹਿਬ ਗੁਰ ਪਰਸਾਦੀ";
-      setTranscribedText(placeholderText);
-      
-      // Search BaniDB with the transcribed text
-      const searchResponse = await fetch(`/api/search?query=${encodeURIComponent(placeholderText)}`);
-      if (searchResponse.ok) {
-        const searchData = await searchResponse.json();
-        setSearchResults(searchData.results);
-      }
-      
-    } catch (err) {
-      setError(`Upload error: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    } finally {
-      setIsUploading(false);
-    }
+    setFullShabad(null); // Allow new searches
+    setSearchTriggered(false);
   };
 
   return (
@@ -256,27 +273,36 @@ function App() {
       </header>
 
       <main className="App-main">
+        {/* Show Full Shabad box if present */}
+        {fullShabad && fullShabad.lines_highlighted && fullShabad.lines_highlighted.length > 0 && (
+          <div className="panel-header search-results" style={{ marginBottom: '2rem' }}>
+            <FullShabadDisplay 
+              fullShabad={fullShabad} 
+              lastWord={
+                (() => {
+                  const combined = (transcribedText + ' ' + interimTranscript).trim();
+                  const words = combined.split(/\s+/);
+                  return words[words.length - 1] || '';
+                })()
+              }
+            />
+          </div>
+        )}
         <div className="controls">
           <div className="control-group">
             <button 
               className={`listen-button ${isListening ? 'listening' : ''}`}
-              onClick={isListening ? stopListening : startListening}
+              onClick={isListening ? pauseListening : startListening}
               disabled={connectionStatus !== 'connected'}
             >
-              {isListening ? '🛑 Stop Listening' : '🎤 Start Listening'}
+              {isListening ? '⏸️ Pause Listening' : '🎤 Start Listening'}
             </button>
-            
-            <FileUpload 
-              onFileUpload={handleFileUpload}
-              isUploading={isUploading}
-              disabled={connectionStatus !== 'connected'}
-            />
           </div>
           
           <button 
             className="clear-button"
-            onClick={clearText}
-            disabled={!transcribedText && searchResults.length === 0 && !uploadedFile}
+            onClick={stopListeningAndClear}
+            disabled={!transcribedText && searchResults.length === 0}
           >
             🗑️ Clear
           </button>
@@ -288,16 +314,10 @@ function App() {
           </div>
         )}
 
-        {uploadedFile && (
-          <div className="upload-info">
-            📁 Uploaded: {uploadedFile}
-          </div>
-        )}
-
         <div className="content-grid">
           <div className="left-panel">
             <TranscriptionPanel 
-              transcribedText={transcribedText}
+              transcribedText={transcribedText + interimTranscript}
               isListening={isListening}
             />
             <AudioVisualizer isListening={isListening} />
@@ -305,12 +325,12 @@ function App() {
           
           <div className="right-panel">
             <SearchResults 
-              results={searchResults}
-              transcribedText={transcribedText}
-              sggsMatchFound={sggsMatchFound}
-              fallbackUsed={fallbackUsed}
-              bestSggsMatch={bestSggsMatch}
-              bestSggsScore={bestSggsScore}
+              results={lastSearchResults}
+              transcribedText={lastSearchQuery}
+              sggsMatchFound={lastSggsMatchFound}
+              fallbackUsed={lastFallbackUsed}
+              bestSggsMatch={lastBestSggsMatch}
+              bestSggsScore={lastBestSggsScore}
             />
           </div>
         </div>

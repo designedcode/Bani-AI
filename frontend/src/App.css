@@ -125,17 +125,6 @@
   text-align: center;
 }
 
-.upload-info {
-  background: rgba(102, 126, 234, 0.1);
-  border: 1px solid rgba(102, 126, 234, 0.3);
-  color: #667eea;
-  padding: 0.75rem 1rem;
-  border-radius: 8px;
-  margin-bottom: 1rem;
-  text-align: center;
-  font-weight: 500;
-}
-
 .content-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -182,5 +171,102 @@
   
   .App-main {
     padding: 1rem;
+  }
+} 
+
+/* --- FullShabadDisplay Styles --- */
+.full-shabad-display {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: 2rem 2.5rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 4px 24px rgba(102, 126, 234, 0.08);
+  border: 1px solid rgba(102, 126, 234, 0.15);
+}
+
+.shabad-header {
+  text-align: left;
+  margin-bottom: 2.5rem;
+  border-bottom: 1px solid rgba(102, 126, 234, 0.15);
+  padding-bottom: 1.2rem;
+}
+.shabad-title {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: #2a4fa0;
+  margin-bottom: 0.3rem;
+}
+.shabad-raag, .shabad-writer, .shabad-page, .shabad-source {
+  font-size: 1.05rem;
+  color: #4a5e8e;
+  margin-bottom: 0.2rem;
+  font-weight: 500;
+}
+.shabad-raag {
+  color: #3b82f6;
+}
+.shabad-writer {
+  color: #6366f1;
+}
+.shabad-page {
+  color: #64748b;
+}
+.shabad-source {
+  color: #64748b;
+}
+
+.shabad-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2.2rem;
+}
+.shabad-line {
+  padding: 1.2rem 1.5rem;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.07);
+  transition: background 0.2s;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.04);
+}
+.shabad-line.highlighted {
+  background: rgba(102, 126, 234, 0.18);
+  border-left: 6px solid #3b82f6;
+}
+.shabad-line.matched-green {
+  border: 2.5px solid #22c55e;
+  background: rgba(34, 197, 94, 0.10);
+  box-shadow: 0 2px 12px rgba(34, 197, 94, 0.10);
+}
+.gurmukhi-text {
+  font-family: 'Noto Sans Gurmukhi', serif;
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: #2563eb;
+  margin-bottom: 0.5rem;
+  line-height: 1.7;
+  letter-spacing: 0.01em;
+}
+.transliteration {
+  font-size: 1.08rem;
+  font-style: italic;
+  color: #475569;
+  margin-bottom: 0.3rem;
+  margin-left: 0.2rem;
+}
+.translation {
+  font-size: 1.01rem;
+  color: #64748b;
+  margin-left: 0.2rem;
+  margin-top: 0.1rem;
+  font-weight: 400;
+}
+@media (max-width: 700px) {
+  .full-shabad-display {
+    padding: 1rem 0.5rem;
+  }
+  .shabad-line {
+    padding: 0.7rem 0.5rem;
+  }
+  .shabad-header {
+    padding-bottom: 0.7rem;
   }
 } 
