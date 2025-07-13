@@ -31,7 +31,7 @@ function App() {
   const [fallbackUsed, setFallbackUsed] = useState<boolean | null>(null);
   const [bestSggsMatch, setBestSggsMatch] = useState<string | null>(null);
   const [bestSggsScore, setBestSggsScore] = useState<number | null>(null);
-  const [fullShabad, setFullShabad] = useState<any>(null);
+  const [shabads, setShabads] = useState<any[]>([]);
   const [searchTriggered, setSearchTriggered] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState('');
   const [lastSearchQuery, setLastSearchQuery] = useState('');
@@ -45,6 +45,7 @@ function App() {
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSentTextRef = useRef<string>('');
+  const shabadsBeingFetched = useRef<Set<number>>(new Set());
 
   // Debounced function to send transcription data
   const debouncedSendTranscription = useCallback((text: string, confidence: number) => {
@@ -60,7 +61,7 @@ function App() {
 
     // Set new timeout
     debounceTimeoutRef.current = setTimeout(() => {
-      if (fullShabad || searchTriggered) return;
+      if (shabads.length > 0 || searchTriggered) return;
       if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
         const transcriptionData: TranscriptionData = {
           text: text,
@@ -70,14 +71,14 @@ function App() {
         lastSentTextRef.current = text;
       }
     }, 300); // 300ms debounce delay
-  }, [fullShabad, searchTriggered]);
+  }, [shabads, searchTriggered]);
 
   // Fix: Clear debounce timer when fullShabad is set
   useEffect(() => {
-    if (fullShabad && debounceTimeoutRef.current) {
+    if (shabads.length > 0 && debounceTimeoutRef.current) {
       clearTimeout(debounceTimeoutRef.current);
     }
-  }, [fullShabad]);
+  }, [shabads]);
 
   // Initialize WebSocket connection
   useEffect(() => {
@@ -111,18 +112,19 @@ function App() {
               setLastBestSggsScore(data.best_sggs_score ?? null);
             }
             // Only fetch full shabad if not already loaded
-            if (!fullShabad && data.results && data.results.length > 0 && data.results[0].shabad_id) {
-              fetch(`/api/full-shabad?shabadId=${data.results[0].shabad_id}`)
-                .then(res => res.json())
-                .then(data => {
-                  setFullShabad(data);
-                  if (data && data.lines_highlighted && data.lines_highlighted.length > 0) {
-                    setSearchTriggered(true);
-                  }
-                })
-                .catch(() => setFullShabad(null));
-            } else if (!data.results || data.results.length === 0) {
-              setFullShabad(null);
+            if (data.results && data.results.length > 0 && data.results[0].shabad_id) {
+              const newShabadId = data.results[0].shabad_id;
+              if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
+                shabadsBeingFetched.current.add(newShabadId);
+                fetch(`/api/full-shabad?shabadId=${newShabadId}`)
+                  .then(res => res.json())
+                  .then(data => {
+                    setShabads(prev => [...prev, data]);
+                  })
+                  .finally(() => {
+                    shabadsBeingFetched.current.delete(newShabadId);
+                  });
+              }
             }
           }
         } catch (err) {
@@ -190,9 +192,10 @@ function App() {
           const updated = prev + newTranscript;
           const fullTranscript = (updated + interim).trim();
           const wordCount = fullTranscript.split(/\s+/).length;
-          if (wordCount >= 8 && !fullShabad) {
-            const first8 = fullTranscript.split(/\s+/).slice(0,8).join(' ');
-            debouncedSendTranscription(first8, maxConfidence);
+          
+          // Backend: Only send when word count >= 8, and send the full transcription
+          if (wordCount >= 8) {
+            debouncedSendTranscription(fullTranscript, maxConfidence);
           }
           return updated;
         });
@@ -250,8 +253,29 @@ function App() {
     setTranscribedText('');
     setInterimTranscript('');
     setSearchResults([]);
-    setFullShabad(null); // Allow new searches
+    setShabads([]); // Allow new searches
     setSearchTriggered(false);
+  };
+
+  // Callback to fetch next shabad
+  const handleNeedNextShabad = () => {
+    const lastShabad = shabads[shabads.length - 1];
+    const nextShabadId = lastShabad?.navigation?.next;
+    if (
+      nextShabadId &&
+      !shabads.some(s => s.shabad_id === nextShabadId) &&
+      !shabadsBeingFetched.current.has(nextShabadId)
+    ) {
+      shabadsBeingFetched.current.add(nextShabadId);
+      fetch(`/api/full-shabad?shabadId=${nextShabadId}`)
+        .then(res => res.json())
+        .then(data => {
+          setShabads(prev => [...prev, data]);
+        })
+        .finally(() => {
+          shabadsBeingFetched.current.delete(nextShabadId);
+        });
+    }
   };
 
   return (
@@ -274,17 +298,17 @@ function App() {
 
       <main className="App-main">
         {/* Show Full Shabad box if present */}
-        {fullShabad && fullShabad.lines_highlighted && fullShabad.lines_highlighted.length > 0 && (
+        {shabads.length > 0 && (
           <div className="panel-header search-results" style={{ marginBottom: '2rem' }}>
             <FullShabadDisplay 
-              fullShabad={fullShabad} 
-              lastWord={
-                (() => {
-                  const combined = (transcribedText + ' ' + interimTranscript).trim();
-                  const words = combined.split(/\s+/);
-                  return words[words.length - 1] || '';
-                })()
-              }
+              shabads={shabads}
+              transcribedText={(() => {
+                const combined = (transcribedText + ' ' + interimTranscript).trim();
+                const words = combined.split(/\s+/);
+                const last4Words = words.slice(-4).join(' ');
+                return last4Words;
+              })()}
+              onNeedNextShabad={handleNeedNextShabad}
             />
           </div>
         )}
