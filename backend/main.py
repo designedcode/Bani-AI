@@ -33,8 +33,6 @@ app.add_middleware(
 
 # BaniDB API configuration
 BANIDB_API_BASE_URL = "https://api.banidb.com/v2"
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
 
 # Create a shared HTTP client with connection pooling for better performance
 http_client = httpx.AsyncClient(
@@ -303,44 +301,6 @@ async def root():
 @app.get("/api/health")
 async def health_check():
     return {"status": "healthy", "service": "Bani AI Transcription"}
-
-@app.post("/api/upload-audio")
-async def upload_audio(file: UploadFile = File(...)):
-    """Upload audio file for transcription"""
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No file provided")
-    
-    # Validate file type
-    allowed_extensions = {'.mp3', '.wav', '.m4a', '.ogg', '.flac'}
-    file_extension = Path(file.filename).suffix.lower()
-    
-    if file_extension not in allowed_extensions:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}"
-        )
-    
-    # Save file
-    file_path = UPLOAD_DIR / f"{file.filename}"
-    try:
-        async with aiofiles.open(file_path, 'wb') as f:
-            content = await file.read()
-            await f.write(content)
-        
-        logger.info(f"Audio file uploaded: {file_path}")
-        
-        # For MVP, we'll return a placeholder response
-        # In production, you'd integrate with a transcription service here
-        return {
-            "message": "File uploaded successfully",
-            "filename": file.filename,
-            "file_path": str(file_path),
-            "transcription": "Placeholder transcription - integrate with transcription service"
-        }
-        
-    except Exception as e:
-        logger.error(f"Error uploading file: {e}")
-        raise HTTPException(status_code=500, detail="Error uploading file")
 
 @app.websocket("/ws/transcription")
 async def websocket_endpoint(websocket: WebSocket):
