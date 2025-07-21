@@ -459,58 +459,12 @@ function App() {
                 />
               </div>
             )}
-            <div className="controls">
-              <div className="control-group">
-                <button 
-                  className={`listen-button ${isListening ? 'listening' : ''}`}
-                  onClick={isListening ? pauseListening : startListening}
-                  disabled={connectionStatus !== 'connected'}
-                >
-                  {isListening ? '⏸️ Pause Listening' : '🎤 Start Listening'}
-                </button>
-              </div>
-              
-              <button 
-                className="clear-button"
-                onClick={stopListeningAndClear}
-                disabled={!transcribedText && searchResults.length === 0}
-              >
-                🗑️ Clear
-              </button>
-            </div>
 
             {error && (
               <div className="error-message">
                 ⚠️ {error}
               </div>
             )}
-
-            <div className="content-grid">
-              <div className="left-panel">
-                {/* Only show TranscriptionPanel in main app if loader is hidden */}
-                {!showLoader && (
-                  <TranscriptionPanel 
-                    transcribedText={transcribedText + interimTranscript}
-                    isListening={isListening}
-                  />
-                )}
-                <AudioVisualizer isListening={isListening} />
-              </div>
-              
-              <div className="right-panel">
-                {/* Only show SearchResults in main app if loader is hidden */}
-                {!showLoader && (
-                  <SearchResults 
-                    results={lastSearchResults}
-                    transcribedText={lastSearchQuery}
-                    sggsMatchFound={lastSggsMatchFound}
-                    fallbackUsed={lastFallbackUsed}
-                    bestSggsMatch={lastBestSggsMatch}
-                    bestSggsScore={lastBestSggsScore}
-                  />
-                )}
-              </div>
-            </div>
           </main>
         </div>
       </div>
