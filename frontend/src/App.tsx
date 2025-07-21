@@ -4,6 +4,7 @@ import TranscriptionPanel from './components/TranscriptionPanel';
 import SearchResults from './components/SearchResults';
 import AudioVisualizer from './components/AudioVisualizer';
 import FullShabadDisplay from './components/FullShabadDisplay';
+import LoadingOverlay from './components/LoadingOverlay';
 
 interface SearchResult {
   gurmukhi_text: string;
@@ -19,6 +20,66 @@ interface SearchResult {
 interface TranscriptionData {
   text: string;
   confidence: number;
+}
+
+// Custom hook for real-time audio volume detection
+function useMicVolume(autoStart: boolean) {
+  const [volume, setVolume] = useState(0);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const dataArrayRef = useRef<Uint8Array | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    let stream: MediaStream | null = null;
+    if (!autoStart) return;
+    let cancelled = false;
+
+    async function setup() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (cancelled) return;
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        audioContextRef.current = audioContext;
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        analyserRef.current = analyser;
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        dataArrayRef.current = dataArray;
+        const source = audioContext.createMediaStreamSource(stream);
+        sourceRef.current = source;
+        source.connect(analyser);
+
+        const updateVolume = () => {
+          if (!analyserRef.current || !dataArrayRef.current) return;
+          analyserRef.current.getByteTimeDomainData(dataArrayRef.current);
+          // Calculate RMS (root mean square) volume
+          let sum = 0;
+          for (let i = 0; i < dataArrayRef.current.length; i++) {
+            const val = (dataArrayRef.current[i] - 128) / 128;
+            sum += val * val;
+          }
+          const rms = Math.sqrt(sum / dataArrayRef.current.length);
+          setVolume(rms);
+          rafRef.current = requestAnimationFrame(updateVolume);
+        };
+        updateVolume();
+      } catch (err) {
+        setVolume(0);
+      }
+    }
+    setup();
+    return () => {
+      cancelled = true;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (audioContextRef.current) audioContextRef.current.close();
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [autoStart]);
+  return volume;
 }
 
 function App() {
@@ -40,12 +101,20 @@ function App() {
   const [lastFallbackUsed, setLastFallbackUsed] = useState<boolean | null>(null);
   const [lastBestSggsMatch, setLastBestSggsMatch] = useState<string | null>(null);
   const [lastBestSggsScore, setLastBestSggsScore] = useState<number | null>(null);
+  const [showLoader, setShowLoader] = useState(true);
+  const [noSpeechCount, setNoSpeechCount] = useState(0);
+  const [userMessage, setUserMessage] = useState('');
+  const MAX_NO_SPEECH_RETRIES = 3;
   
   const websocketRef = useRef<WebSocket | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSentTextRef = useRef<string>('');
   const shabadsBeingFetched = useRef<Set<number>>(new Set());
+  const [subtitleText, setSubtitleText] = useState('');
+  const [showMatchedSubtitle, setShowMatchedSubtitle] = useState(false);
+  const MATCH_DISPLAY_DELAY = 1800; // ms
+  const recognitionManuallyStoppedRef = useRef(false);
 
   // Debounced function to send transcription data
   const debouncedSendTranscription = useCallback((text: string, confidence: number) => {
@@ -161,7 +230,6 @@ function App() {
   // Initialize speech recognition
   useEffect(() => {
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      // Clean up previous recognition instance only on unmount
       if (recognitionRef.current) {
         recognitionRef.current.abort();
       }
@@ -169,10 +237,12 @@ function App() {
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
       recognition.interimResults = true;
-      recognition.lang = 'pa-IN'; // Punjabi (India)
+      recognition.lang = 'pa-IN';
       recognition.onstart = () => {
         console.log('Speech recognition started');
         setIsListening(true);
+        setUserMessage('');
+        recognitionManuallyStoppedRef.current = false;
       };
       recognition.onresult = (event) => {
         let newTranscript = '';
@@ -202,30 +272,97 @@ function App() {
         setInterimTranscript(interim);
       };
       recognition.onerror = (event) => {
-        console.error('Speech recognition error:', event.error);
-        // Only show error if it's not an intentional abort
-        if (event.error !== 'aborted') {
-          setError(`Speech recognition error: ${event.error}`);
+        console.log('Speech recognition error:');
+        if (event.error === 'no-speech') {
+          setUserMessage('No speech detected. Please try speaking again.');
+          // Always auto-restart unless manually stopped
+          if (!recognitionManuallyStoppedRef.current) {
+            setTimeout(() => {
+              try {
+                recognition.start();
+              } catch (e) {}
+            }, 800);
+          }
+        } else if (event.error === 'aborted') {
+          recognitionManuallyStoppedRef.current = true;
         } else {
-          setError(''); // Clear error for abort
+          setError(`Speech recognition error: ${event.error}`);
+          // For other errors, auto-restart unless manually stopped
+          if (!recognitionManuallyStoppedRef.current) {
+            setTimeout(() => {
+              try {
+                recognition.start();
+              } catch (e) {}
+            }, 1200);
+          }
         }
         setIsListening(false);
       };
       recognition.onend = () => {
         console.log('Speech recognition ended');
         setIsListening(false);
+        // Always auto-restart unless manually stopped
+        if (!recognitionManuallyStoppedRef.current) {
+          setTimeout(() => {
+            try {
+              recognition.start();
+            } catch (e) {}
+          }, 800);
+        }
       };
       recognitionRef.current = recognition;
     } else {
       setError('Speech recognition not supported in this browser');
     }
-    // Cleanup only on unmount
     return () => {
       if (recognitionRef.current) {
         recognitionRef.current.abort();
       }
     };
-  }, []); // Only run once on mount/unmount
+  }, []);
+
+  // Hide loader as soon as a shabad is found
+  useEffect(() => {
+    if (shabads.length > 0) {
+      setShowLoader(false);
+    }
+  }, [shabads]);
+
+  // Show live transcription as subtitle during loading
+  useEffect(() => {
+    if (showLoader && !showMatchedSubtitle) {
+      const subtitle = (transcribedText + ' ' + interimTranscript).trim();
+      setSubtitleText(subtitle);
+      console.log('[DEBUG] Subtitle update:', { transcribedText, interimTranscript, subtitle });
+    }
+  }, [transcribedText, interimTranscript, showLoader, showMatchedSubtitle]);
+
+  // When SGGS match is found, show matched text as subtitle, then transition
+  useEffect(() => {
+    if (showLoader && lastSggsMatchFound && lastBestSggsMatch) {
+      setShowMatchedSubtitle(true);
+      setSubtitleText(lastBestSggsMatch);
+      const timer = setTimeout(() => {
+        setShowLoader(false);
+        setShowMatchedSubtitle(false);
+      }, MATCH_DISPLAY_DELAY);
+      return () => clearTimeout(timer);
+    }
+  }, [showLoader, lastSggsMatchFound, lastBestSggsMatch]);
+
+  // Start mic volume detection as soon as the app loads
+  const micVolume = useMicVolume(true);
+
+  // Automatically start speech recognition on mount
+  useEffect(() => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.start();
+      } catch (error) {
+        // Already started or error
+      }
+    }
+  }, []);
 
   const startListening = () => {
     if (recognitionRef.current) {
@@ -240,20 +377,22 @@ function App() {
 
   const pauseListening = () => {
     if (recognitionRef.current) {
-      recognitionRef.current.abort(); // Use abort to forcefully stop and release mic
+      recognitionRef.current.abort();
     }
     setIsListening(false);
+    recognitionManuallyStoppedRef.current = true;
   };
 
   const stopListeningAndClear = () => {
     if (recognitionRef.current) {
-      recognitionRef.current.abort(); // Use abort to forcefully stop and release mic
+      recognitionRef.current.abort();
     }
     setIsListening(false);
+    recognitionManuallyStoppedRef.current = true;
     setTranscribedText('');
     setInterimTranscript('');
     setSearchResults([]);
-    setShabads([]); // Allow new searches
+    setShabads([]);
     setSearchTriggered(false);
   };
 
@@ -279,87 +418,103 @@ function App() {
   };
 
   return (
-    <div className="App">
-      <header className="App-header">
-        <h1>ੴ Bani AI</h1>
-        <p>Real-time Punjabi Audio Transcription & BaniDB Search</p>
-        
-        <div className="connection-status">
-          <span className={`status-indicator ${connectionStatus}`}>
-            {connectionStatus === 'connected' ? '🟢' : 
-             connectionStatus === 'connecting' ? '🟡' : '🔴'}
-          </span>
-          <span className="status-text">
-            {connectionStatus === 'connected' ? 'Connected to BaniDB API' : 
-             connectionStatus === 'connecting' ? 'Connecting...' : 'Disconnected'}
-          </span>
-        </div>
-      </header>
+    <>
+      <LoadingOverlay className={showLoader ? '' : 'fade-out'} volume={micVolume} subtitle={showLoader ? subtitleText : undefined} />
+      <div style={{ display: showLoader ? 'none' : 'block' }}>
+        <div className="App">
+          <header className="App-header">
+            <h1>ੴ Bani AI</h1>
+            <p>Real-time Punjabi Audio Transcription & BaniDB Search</p>
+            {userMessage && (
+              <div className="user-message" style={{ color: '#ffb347', fontWeight: 600, margin: '1rem 0' }}>
+                {userMessage}
+              </div>
+            )}
+            
+            <div className="connection-status">
+              <span className={`status-indicator ${connectionStatus}`}>
+                {connectionStatus === 'connected' ? '🟢' : 
+                 connectionStatus === 'connecting' ? '🟡' : '🔴'}
+              </span>
+              <span className="status-text">
+                {connectionStatus === 'connected' ? 'Connected to BaniDB API' : 
+                 connectionStatus === 'connecting' ? 'Connecting...' : 'Disconnected'}
+              </span>
+            </div>
+          </header>
 
-      <main className="App-main">
-        {/* Show Full Shabad box if present */}
-        {shabads.length > 0 && (
-          <div className="panel-header search-results" style={{ marginBottom: '2rem' }}>
-            <FullShabadDisplay 
-              shabads={shabads}
-              transcribedText={(() => {
-                const combined = (transcribedText + ' ' + interimTranscript).trim();
-                const words = combined.split(/\s+/);
-                const last4Words = words.slice(-4).join(' ');
-                return last4Words;
-              })()}
-              onNeedNextShabad={handleNeedNextShabad}
-            />
-          </div>
-        )}
-        <div className="controls">
-          <div className="control-group">
-            <button 
-              className={`listen-button ${isListening ? 'listening' : ''}`}
-              onClick={isListening ? pauseListening : startListening}
-              disabled={connectionStatus !== 'connected'}
-            >
-              {isListening ? '⏸️ Pause Listening' : '🎤 Start Listening'}
-            </button>
-          </div>
-          
-          <button 
-            className="clear-button"
-            onClick={stopListeningAndClear}
-            disabled={!transcribedText && searchResults.length === 0}
-          >
-            🗑️ Clear
-          </button>
-        </div>
+          <main className="App-main">
+            {/* Show Full Shabad box if present */}
+            {shabads.length > 0 && (
+              <div className="panel-header search-results" style={{ marginBottom: '2rem' }}>
+                <FullShabadDisplay 
+                  shabads={shabads}
+                  transcribedText={(() => {
+                    const combined = (transcribedText + ' ' + interimTranscript).trim();
+                    const words = combined.split(/\s+/);
+                    const last4Words = words.slice(-4).join(' ');
+                    return last4Words;
+                  })()}
+                  onNeedNextShabad={handleNeedNextShabad}
+                />
+              </div>
+            )}
+            <div className="controls">
+              <div className="control-group">
+                <button 
+                  className={`listen-button ${isListening ? 'listening' : ''}`}
+                  onClick={isListening ? pauseListening : startListening}
+                  disabled={connectionStatus !== 'connected'}
+                >
+                  {isListening ? '⏸️ Pause Listening' : '🎤 Start Listening'}
+                </button>
+              </div>
+              
+              <button 
+                className="clear-button"
+                onClick={stopListeningAndClear}
+                disabled={!transcribedText && searchResults.length === 0}
+              >
+                🗑️ Clear
+              </button>
+            </div>
 
-        {error && (
-          <div className="error-message">
-            ⚠️ {error}
-          </div>
-        )}
+            {error && (
+              <div className="error-message">
+                ⚠️ {error}
+              </div>
+            )}
 
-        <div className="content-grid">
-          <div className="left-panel">
-            <TranscriptionPanel 
-              transcribedText={transcribedText + interimTranscript}
-              isListening={isListening}
-            />
-            <AudioVisualizer isListening={isListening} />
-          </div>
-          
-          <div className="right-panel">
-            <SearchResults 
-              results={lastSearchResults}
-              transcribedText={lastSearchQuery}
-              sggsMatchFound={lastSggsMatchFound}
-              fallbackUsed={lastFallbackUsed}
-              bestSggsMatch={lastBestSggsMatch}
-              bestSggsScore={lastBestSggsScore}
-            />
-          </div>
+            <div className="content-grid">
+              <div className="left-panel">
+                {/* Only show TranscriptionPanel in main app if loader is hidden */}
+                {!showLoader && (
+                  <TranscriptionPanel 
+                    transcribedText={transcribedText + interimTranscript}
+                    isListening={isListening}
+                  />
+                )}
+                <AudioVisualizer isListening={isListening} />
+              </div>
+              
+              <div className="right-panel">
+                {/* Only show SearchResults in main app if loader is hidden */}
+                {!showLoader && (
+                  <SearchResults 
+                    results={lastSearchResults}
+                    transcribedText={lastSearchQuery}
+                    sggsMatchFound={lastSggsMatchFound}
+                    fallbackUsed={lastFallbackUsed}
+                    bestSggsMatch={lastBestSggsMatch}
+                    bestSggsScore={lastBestSggsScore}
+                  />
+                )}
+              </div>
+            </div>
+          </main>
         </div>
-      </main>
-    </div>
+      </div>
+    </>
   );
 }
 
