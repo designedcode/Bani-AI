@@ -5,9 +5,18 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #111 !important;
   min-height: 100vh;
   overflow-x: hidden;
+  color: #fff;
+  text-align: center;
+}
+
+.gurmukhi-text {
+  font-family: 'Noto Sans Gurmukhi', serif;
+  font-size: 2.1em;
+  line-height: 1.6;
+  color: #fff;
 }
 
 code {
