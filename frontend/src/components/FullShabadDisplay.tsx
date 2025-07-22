@@ -216,7 +216,7 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
   // Render all shabads with divider
   let currentShabadIdx = -1;
   return (
-    <div>
+    <div className="full-shabad-display">
       {allLines.map(({ line, shabadIndex, lineIndex }, idx) => {
         let divider = null;
         let shabadHeader = null;
@@ -227,7 +227,7 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
             divider = <div style={{ borderTop: '2px solid #ccc', margin: '2rem 0' }} />;
           }
           shabadHeader = (
-            <div className="shabad-header" style={{ margin: '1rem 0', padding: '0.5rem', background: '#f5f5f5', borderRadius: '8px' }}>
+            <div className="shabad-header">
               {shabad.raag && <div className="shabad-raag"><b>Raag:</b> {shabad.raag}</div>}
               {shabad.writer && <div className="shabad-writer"><b>Writer:</b> {shabad.writer}</div>}
               {shabad.shabad_name && <div className="shabad-title"><b>Title:</b> {shabad.shabad_name}</div>}
@@ -237,35 +237,28 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
           );
         }
         const isHighlighted = idx === highlightedLineIndex;
+        let lineClass = 'shabad-line';
+        if (isHighlighted) lineClass += ' highlighted highlighted-green';
+        // Optionally add 'matched-green' if you have a match state
         return (
           <React.Fragment key={`shabad${shabadIndex}-line${lineIndex}`}>
             {divider}
             {shabadHeader}
             <div
               ref={el => (lineRefs.current[idx] = el)}
-              className={`gurmukhi-line${isHighlighted ? ' highlighted' : ''}`}
-              style={{
-                background: isHighlighted ? '#fff' : undefined,
-                borderRadius: isHighlighted ? '6px' : undefined,
-                padding: '0.5rem',
-                marginBottom: '0.5rem',
-                border: isHighlighted ? '2px solid #43a047' : '1px solid #eee',
-                fontWeight: isHighlighted ? 700 : 400,
-                fontSize: '1.2rem',
-                boxShadow: isHighlighted ? '0 0 8px #43a04733' : undefined,
-              }}
+              className={lineClass}
             >
-              <div className="gurmukhi-text" style={{ fontFamily: 'Noto Sans Gurmukhi, serif', fontSize: '1.2em', color: isHighlighted ? '#43a047' : undefined }}>
+              <div className="gurmukhi-text">
                 {line.gurmukhi_highlighted || line.gurmukhi_original}
               </div>
               {line.transliteration && (
-                <div className="transliteration" style={{ color: '#555', fontSize: '1em', marginTop: '0.2em' }}>
-                  <b>Transliteration:</b> {line.transliteration}
+                <div className="transliteration">
+                  {line.transliteration}
                 </div>
               )}
               {line.translation && (
-                <div className="translation" style={{ color: '#1976d2', fontSize: '1em', marginTop: '0.2em' }}>
-                  <b>Translation:</b> {line.translation}
+                <div className="translation">
+                  {line.translation}
                 </div>
               )}
             </div>

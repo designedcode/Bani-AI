@@ -45,10 +45,13 @@
 
 .App-main {
   flex: 1;
-  padding: 2rem;
-  max-width: 1400px;
+  padding: 2rem 0;
+  max-width: 900px;
   margin: 0 auto;
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .controls {
@@ -156,30 +159,43 @@
 } 
 
 /* --- FullShabadDisplay Styles --- */
+body, .App {
+  background: #111 !important;
+  min-height: 100vh;
+  color: #fff;
+}
+
 .full-shabad-display {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 16px;
-  padding: 2rem 2.5rem;
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
   margin-bottom: 2rem;
-  box-shadow: 0 4px 24px rgba(102, 126, 234, 0.08);
-  border: 1px solid rgba(102, 126, 234, 0.15);
+  border-radius: 0 !important;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .shabad-header {
-  text-align: left;
+  text-align: center;
   margin-bottom: 2.5rem;
-  border-bottom: 1px solid rgba(102, 126, 234, 0.15);
-  padding-bottom: 1.2rem;
+  border: none !important;
+  padding-bottom: 0.8rem;
+  background: none !important;
+  color: #fff;
 }
+
 .shabad-title {
-  font-size: 1.6rem;
+  font-size: 2rem;
   font-weight: 700;
-  color: #2a4fa0;
+  color: #fff;
   margin-bottom: 0.3rem;
 }
 .shabad-raag, .shabad-writer, .shabad-page, .shabad-source {
-  font-size: 1.05rem;
-  color: #4a5e8e;
+  font-size: 1.1rem;
+  color: #fff;
   margin-bottom: 0.2rem;
   font-weight: 500;
 }
@@ -199,18 +215,34 @@
 .shabad-lines {
   display: flex;
   flex-direction: column;
-  gap: 2.2rem;
+  gap: 2.5rem;
+  align-items: center;
 }
 .shabad-line {
-  padding: 1.2rem 1.5rem;
-  border-radius: 12px;
-  background: rgba(255,255,255,0.07);
-  transition: background 0.2s;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.04);
+  padding: 0.5rem 0;
+  border-radius: 0;
+  box-shadow: none !important;
+  border: none !important;
+  margin-bottom: 0.5rem;
+  width: 100%;
+  text-align: center;
+  transition: none;
 }
 .shabad-line.highlighted {
-  background: rgba(102, 126, 234, 0.18);
-  border-left: 6px solid #3b82f6;
+  border-left: 6px solid #ffd700;
+}
+.shabad-line.highlighted-green, .shabad-line.highlighted.highlighted-green {
+  color: inherit !important;
+  border-left: 8px solid #2ecc40 !important;
+  background: none !important;
+  padding: 0.5rem 0 0.5rem 1.2rem !important;
+  border-radius: 0 !important;
+  margin: 0.5rem 0 !important;
+  box-shadow: none !important;
+  display: block !important;
+  align-items: unset !important;
+  min-height: unset !important;
+  transition: border-left 0.2s !important;
 }
 .shabad-line.matched-green {
   border: 2.5px solid #22c55e;
@@ -219,35 +251,39 @@
 }
 .gurmukhi-text {
   font-family: 'Noto Sans Gurmukhi', serif;
-  font-size: 1.45rem;
+  font-size: 2.1rem;
   font-weight: 700;
-  color: #2563eb;
-  margin-bottom: 0.5rem;
+  color: #fff;
+  margin-bottom: 0.3rem;
   line-height: 1.7;
   letter-spacing: 0.01em;
 }
+.gurmukhi-text .highlight-gold {
+  color: #ffd700;
+  font-weight: 700;
+}
 .transliteration {
-  font-size: 1.08rem;
+  font-size: 1.15rem;
   font-style: italic;
-  color: #475569;
-  margin-bottom: 0.3rem;
-  margin-left: 0.2rem;
+  color: #fff;
+  margin-bottom: 0.2rem;
+  margin-left: 0;
 }
 .translation {
-  font-size: 1.01rem;
-  color: #64748b;
-  margin-left: 0.2rem;
+  font-size: 1.05rem;
+  color: #ccc;
+  margin-left: 0;
   margin-top: 0.1rem;
   font-weight: 400;
 }
 @media (max-width: 700px) {
   .full-shabad-display {
-    padding: 1rem 0.5rem;
+    padding: 0 !important;
   }
   .shabad-line {
-    padding: 0.7rem 0.5rem;
+    padding: 0.3rem 0;
   }
-  .shabad-header {
-    padding-bottom: 0.7rem;
+  .gurmukhi-text {
+    font-size: 1.3rem;
   }
 } 
