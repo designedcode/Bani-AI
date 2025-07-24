@@ -113,14 +113,23 @@ def strip_gurmukhi_matras(text: str) -> str:
     """
     Strip matras (vowel signs) from Gurmukhi text, keeping only the main letters.
     This helps with search as BaniDB expects simplified Gurmukhi.
+    Also removes common non-distinctive phrases/symbols (e.g., Ik Onkar variants).
     """
     if not text:
         return ""
     
     text = unicodedata.normalize('NFC', text)
     
-    # Remove ੴ (Ik Onkar) explicitly
-    text = text.replace('\u0A74', '')  # Remove ੴ
+    # Remove ੴ (Ik Onkar) and common phrases explicitly
+    ignore_patterns = [
+        '\u0A74',  # ੴ symbol (Ik Onkar)
+        'ੴ',       # ੴ symbol (Ik Onkar, literal)
+        'ਇਕ ਓਕਾਰ',  # Ek Onkar phrase
+        'ਇ ਓਕਾਰ',   # I Okaar phrase
+        'ਇਕ ਓਂਕਾਰ', # Ek Omkaar phrase
+    ]
+    for pattern in ignore_patterns:
+        text = text.replace(pattern, '')
 
     # First, convert problematic characters to their base forms
     char_mappings = {
@@ -134,7 +143,6 @@ def strip_gurmukhi_matras(text: str) -> str:
         'ਓ': 'ੳ',  # o -> base u
         'ਔ': 'ੳ',  # au -> base u
     }
-    
     for old_char, new_char in char_mappings.items():
         text = text.replace(old_char, new_char)
     
@@ -183,25 +191,12 @@ def get_first_letters_search(text: str) -> str:
     if not text:
         return ""
     
-    # Remove special characters and common phrases that shouldn't be searched
-    ignore_patterns = [
-        'ੴ',  # Ek Onkar symbol
-        'ਇਕ ਓਕਾਰ',  # Ek Onkar phrase
-        'ਇ ਓਕਾਰ',   # I Okaar phrase
-        'ਇਕ ਓਂਕਾਰ', # Ek Omkaar phrase
-    ]
-    
-    # Remove ignore patterns from text
-    cleaned_text = text
-    for pattern in ignore_patterns:
-        cleaned_text = cleaned_text.replace(pattern, '')
+    # Strip matras and ignore patterns first (now handled in strip_gurmukhi_matras)
+    stripped_text = strip_gurmukhi_matras(text)
     
     # If nothing left after removing patterns, return empty
-    if not cleaned_text.strip():
+    if not stripped_text.strip():
         return ""
-    
-    # Strip matras first
-    stripped_text = strip_gurmukhi_matras(cleaned_text)
     
     # Split into words and get first letter of each
     words = stripped_text.split()
