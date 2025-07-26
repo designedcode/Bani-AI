@@ -5,6 +5,8 @@ import SearchResults from './components/SearchResults';
 import AudioVisualizer from './components/AudioVisualizer';
 import FullShabadDisplay from './components/FullShabadDisplay';
 import LoadingOverlay from './components/LoadingOverlay';
+import StickyButtons from './components/StickyButtons';
+import MetadataPills from './components/MetadataPills';
 
 interface SearchResult {
   gurmukhi_text: string;
@@ -430,7 +432,6 @@ function App() {
                 {userMessage}
               </div>
             )}
-            
             <div className="connection-status">
               <span className={`status-indicator ${connectionStatus}`}>
                 {connectionStatus === 'connected' ? '🟢' : 
@@ -442,6 +443,20 @@ function App() {
               </span>
             </div>
           </header>
+
+          {/* Sticky Pills + Buttons Row */}
+          {shabads.length > 0 && (
+            <div className="sticky-header-row">
+              <div className="sticky-header-left">
+                <MetadataPills
+                  raag={shabads[0]?.raag}
+                  writer={shabads[0]?.writer}
+                  page={shabads[0]?.page_no}
+                />
+                <StickyButtons />
+              </div>
+            </div>
+          )}
 
           <main className="App-main">
             {/* Show Full Shabad box if present */}

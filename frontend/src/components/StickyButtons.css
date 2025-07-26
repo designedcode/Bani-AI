@@ -1,0 +1,56 @@
+.sticky-buttons {
+  display: flex;
+  gap: 1.1rem;
+  align-items: center;
+}
+
+.reset-btn {
+  background: transparent;
+  color: #fff;
+  border: 2.5px solid #fff;
+  border-radius: 2rem;
+  padding: 0.3rem 1.2rem;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.18s, color 0.18s, border 0.18s;
+  box-shadow: none;
+}
+.reset-btn:hover, .reset-btn:focus {
+  background: #fff;
+  color: #111;
+  border-color: #fff;
+}
+
+.fullscreen-btn {
+  background: #222;
+  border: none;
+  border-radius: 0.4rem;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.18s, box-shadow 0.18s;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.07);
+}
+.fullscreen-btn:hover, .fullscreen-btn:focus {
+  background: #333;
+  box-shadow: 0 0 0 2.5px #fff;
+}
+.fullscreen-btn svg {
+  display: block;
+}
+
+@media (max-width: 700px) {
+  .reset-btn {
+    font-size: 0.85rem;
+    padding: 0.25rem 0.9rem;
+  }
+  .fullscreen-btn {
+    width: 32px;
+    height: 32px;
+  }
+} 
