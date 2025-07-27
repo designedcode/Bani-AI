@@ -1,0 +1,164 @@
+.error-message {
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  border-radius: 8px;
+  margin: 1rem 0;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.error-message-content {
+  padding: 1rem;
+}
+
+.error-message-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.error-icon {
+  font-size: 1.2rem;
+}
+
+.error-title {
+  font-weight: 600;
+  color: #ff6b6b;
+  flex: 1;
+}
+
+.error-dismiss {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.error-dismiss:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.error-message-body {
+  margin-bottom: 1rem;
+}
+
+.error-user-message {
+  color: rgba(255, 255, 255, 0.9);
+  margin: 0 0 0.75rem 0;
+  line-height: 1.5;
+}
+
+.error-technical-details {
+  margin-top: 0.75rem;
+}
+
+.error-technical-details summary {
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.9rem;
+  padding: 0.25rem 0;
+  border-radius: 4px;
+  transition: color 0.2s ease;
+}
+
+.error-technical-details summary:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.error-details-content {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-family: 'Courier New', monospace;
+}
+
+.error-details-content p {
+  margin: 0.25rem 0;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.error-details-content strong {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.error-message-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.error-retry-button {
+  background: #ff6b6b;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.9rem;
+}
+
+.error-retry-button:hover {
+  background: #ff5252;
+  transform: translateY(-1px);
+}
+
+.error-retry-button:active {
+  transform: translateY(0);
+}
+
+/* Compact variant for inline errors */
+.error-message.compact {
+  margin: 0.5rem 0;
+}
+
+.error-message.compact .error-message-content {
+  padding: 0.75rem;
+}
+
+.error-message.compact .error-message-header {
+  margin-bottom: 0.5rem;
+}
+
+.error-message.compact .error-user-message {
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+/* Toast variant for floating notifications */
+.error-message.toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  max-width: 400px;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.error-message.toast .error-message-content {
+  padding: 1rem 1.25rem;
+}

@@ -7,22 +7,14 @@ import FullShabadDisplay from './components/FullShabadDisplay';
 import LoadingOverlay from './components/LoadingOverlay';
 import StickyButtons from './components/StickyButtons';
 import MetadataPills from './components/MetadataPills';
+import ErrorBoundary from './components/ErrorBoundary';
+import ErrorMessage from './components/ErrorMessage';
+import LoadingState from './components/LoadingState';
 
-interface SearchResult {
-  gurmukhi_text: string;
-  english_translation: string;
-  line_number: number;
-  page_number: number;
-  source?: string;
-  writer?: string;
-  raag?: string;
-  shabad_id: string;
-}
-
-interface TranscriptionData {
-  text: string;
-  confidence: number;
-}
+// Import new services
+import { TranscriptionService } from './services/TranscriptionService';
+import baniDBService from './services/BaniDBService';
+import { SearchResult, TranscriptionData, SearchResultMessage, ApiError } from './types/SearchTypes';
 
 // Custom hook for real-time audio volume detection
 function useMicVolume(autoStart: boolean) {
@@ -89,7 +81,7 @@ function App() {
   const [transcribedText, setTranscribedText] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
-  const [error, setError] = useState<string>('');
+  const [error, setError] = useState<ApiError | string | null>(null);
   const [sggsMatchFound, setSggsMatchFound] = useState<boolean | null>(null);
   const [fallbackUsed, setFallbackUsed] = useState<boolean | null>(null);
   const [bestSggsMatch, setBestSggsMatch] = useState<string | null>(null);
@@ -106,9 +98,12 @@ function App() {
   const [showLoader, setShowLoader] = useState(true);
   const [noSpeechCount, setNoSpeechCount] = useState(0);
   const [userMessage, setUserMessage] = useState('');
+  const [isDataLoading, setIsDataLoading] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
   const MAX_NO_SPEECH_RETRIES = 3;
+  const MAX_RETRY_ATTEMPTS = 3;
   
-  const websocketRef = useRef<WebSocket | null>(null);
+  const transcriptionServiceRef = useRef<TranscriptionService | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSentTextRef = useRef<string>('');
@@ -133,12 +128,8 @@ function App() {
     // Set new timeout
     debounceTimeoutRef.current = setTimeout(() => {
       if (shabads.length > 0 || searchTriggered) return;
-      if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-        const transcriptionData: TranscriptionData = {
-          text: text,
-          confidence: confidence
-        };
-        websocketRef.current.send(JSON.stringify(transcriptionData));
+      if (transcriptionServiceRef.current) {
+        transcriptionServiceRef.current.sendTranscription(text, confidence);
         lastSentTextRef.current = text;
       }
     }, 300); // 300ms debounce delay
@@ -151,77 +142,93 @@ function App() {
     }
   }, [shabads]);
 
-  // Initialize WebSocket connection
+  // Initialize TranscriptionService
   useEffect(() => {
-    const connectWebSocket = () => {
+    const initializeTranscriptionService = async () => {
       setConnectionStatus('connecting');
       
-      const ws = new WebSocket('ws://localhost:8000/ws/transcription');
+      const transcriptionService = new TranscriptionService();
+      transcriptionServiceRef.current = transcriptionService;
       
-      ws.onopen = () => {
-        setConnectionStatus('connected');
-        setError('');
-        console.log('WebSocket connected');
-      };
-      
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'search_result') {
-            setSearchResults(data.results);
-            setSggsMatchFound(data.sggs_match_found ?? null);
-            setFallbackUsed(data.fallback_used ?? null);
-            setBestSggsMatch(data.best_sggs_match ?? null);
-            setBestSggsScore(data.best_sggs_score ?? null);
-            // Only update last* states if results are present (i.e., a search actually happened)
-            if (data.results && data.results.length > 0) {
-              setLastSearchQuery(data.transcribed_text);
-              setLastSearchResults(data.results);
-              setLastSggsMatchFound(data.sggs_match_found ?? null);
-              setLastFallbackUsed(data.fallback_used ?? null);
-              setLastBestSggsMatch(data.best_sggs_match ?? null);
-              setLastBestSggsScore(data.best_sggs_score ?? null);
-            }
-            // Only fetch full shabad if not already loaded
-            if (data.results && data.results.length > 0 && data.results[0].shabad_id) {
-              const newShabadId = data.results[0].shabad_id;
-              if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
-                shabadsBeingFetched.current.add(newShabadId);
-                fetch(`/api/full-shabad?shabadId=${newShabadId}`)
-                  .then(res => res.json())
-                  .then(data => {
-                    setShabads(prev => [...prev, data]);
-                  })
-                  .finally(() => {
-                    shabadsBeingFetched.current.delete(newShabadId);
-                  });
-              }
-            }
-          }
-        } catch (err) {
-          console.error('Error parsing WebSocket message:', err);
+      // Set up message handler
+      transcriptionService.onMessage((message: SearchResultMessage) => {
+        console.log('Received search result message:', message);
+        
+        setSearchResults(message.results);
+        setSggsMatchFound(message.sggs_match_found ?? null);
+        setFallbackUsed(message.fallback_used ?? null);
+        setBestSggsMatch(message.best_sggs_match ?? null);
+        setBestSggsScore(message.best_sggs_score ?? null);
+        
+        // Only update last* states if results are present (i.e., a search actually happened)
+        if (message.results && message.results.length > 0) {
+          setLastSearchQuery(message.transcribed_text);
+          setLastSearchResults(message.results);
+          setLastSggsMatchFound(message.sggs_match_found ?? null);
+          setLastFallbackUsed(message.fallback_used ?? null);
+          setLastBestSggsMatch(message.best_sggs_match ?? null);
+          setLastBestSggsScore(message.best_sggs_score ?? null);
         }
-      };
+        
+        // Only fetch full shabad if not already loaded
+        if (message.results && message.results.length > 0 && message.results[0].shabad_id) {
+          const newShabadId = message.results[0].shabad_id;
+          if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
+            shabadsBeingFetched.current.add(newShabadId);
+            setIsDataLoading(true);
+            baniDBService.getFullShabad(newShabadId)
+              .then(response => {
+                if (response.success && response.data) {
+                  setShabads(prev => [...prev, response.data]);
+                  setError(null);
+                } else if (response.error) {
+                  setError(response.error);
+                }
+              })
+              .catch(err => {
+                console.error('Error fetching shabad:', err);
+                setError(err);
+              })
+              .finally(() => {
+                shabadsBeingFetched.current.delete(newShabadId);
+                setIsDataLoading(false);
+              });
+          }
+        }
+      });
       
-      ws.onclose = () => {
+      // Set up error handler
+      transcriptionService.onError((error) => {
+        console.error('TranscriptionService error:', error);
+        setError(error);
         setConnectionStatus('disconnected');
-        console.log('WebSocket disconnected');
-      };
+      });
       
-      ws.onerror = (error) => {
+      // Set up connection handler
+      transcriptionService.onConnection((connected) => {
+        setConnectionStatus(connected ? 'connected' : 'disconnected');
+        if (connected) {
+          setError(null);
+          setRetryCount(0);
+          console.log('TranscriptionService connected');
+        } else {
+          console.log('TranscriptionService disconnected');
+        }
+      });
+      
+      // Connect the service
+      const connectResult = await transcriptionService.connect();
+      if (!connectResult.success) {
+        setError(connectResult.error || 'Failed to initialize transcription service');
         setConnectionStatus('disconnected');
-        setError('WebSocket connection failed');
-        console.error('WebSocket error:', error);
-      };
-      
-      websocketRef.current = ws;
+      }
     };
 
-    connectWebSocket();
+    initializeTranscriptionService();
 
     return () => {
-      if (websocketRef.current) {
-        websocketRef.current.close();
+      if (transcriptionServiceRef.current) {
+        transcriptionServiceRef.current.cleanup();
       }
       if (debounceTimeoutRef.current) {
         clearTimeout(debounceTimeoutRef.current);
@@ -408,19 +415,57 @@ function App() {
       !shabadsBeingFetched.current.has(nextShabadId)
     ) {
       shabadsBeingFetched.current.add(nextShabadId);
-      fetch(`/api/full-shabad?shabadId=${nextShabadId}`)
-        .then(res => res.json())
-        .then(data => {
-          setShabads(prev => [...prev, data]);
+      setIsDataLoading(true);
+      baniDBService.getFullShabad(nextShabadId)
+        .then(response => {
+          if (response.success && response.data) {
+            setShabads(prev => [...prev, response.data]);
+            setError(null);
+          } else if (response.error) {
+            setError(response.error);
+          }
+        })
+        .catch(err => {
+          console.error('Error fetching next shabad:', err);
+          setError(err);
         })
         .finally(() => {
           shabadsBeingFetched.current.delete(nextShabadId);
+          setIsDataLoading(false);
         });
     }
   };
 
+  // Retry function for failed operations
+  const handleRetry = useCallback(() => {
+    if (retryCount < MAX_RETRY_ATTEMPTS) {
+      setRetryCount(prev => prev + 1);
+      setError(null);
+      
+      // Retry transcription service connection if disconnected
+      if (connectionStatus === 'disconnected' && transcriptionServiceRef.current) {
+        setConnectionStatus('connecting');
+        transcriptionServiceRef.current.connect()
+          .then(result => {
+            if (!result.success) {
+              setError(result.error || 'Failed to reconnect');
+              setConnectionStatus('disconnected');
+            }
+          });
+      }
+    } else {
+      setUserMessage('Maximum retry attempts reached. Please refresh the page.');
+    }
+  }, [retryCount, connectionStatus]);
+
+  // Clear error function
+  const handleClearError = useCallback(() => {
+    setError(null);
+    setRetryCount(0);
+  }, []);
+
   return (
-    <>
+    <ErrorBoundary>
       <LoadingOverlay className={showLoader ? '' : 'fade-out'} volume={micVolume} subtitle={showLoader ? subtitleText : undefined} />
       <div style={{ display: showLoader ? 'none' : 'block' }}>
         <div className="App">
@@ -441,7 +486,20 @@ function App() {
                 {connectionStatus === 'connected' ? 'Connected to BaniDB API' : 
                  connectionStatus === 'connecting' ? 'Connecting...' : 'Disconnected'}
               </span>
+              {connectionStatus === 'connecting' && (
+                <LoadingState size="small" variant="dots" inline message="" />
+              )}
             </div>
+
+            {/* Error Display */}
+            {error && (
+              <ErrorMessage
+                error={error}
+                onRetry={handleRetry}
+                onDismiss={handleClearError}
+                showRetry={retryCount < MAX_RETRY_ATTEMPTS}
+              />
+            )}
           </header>
 
           {/* Sticky Pills + Buttons Row */}
@@ -461,29 +519,38 @@ function App() {
           <main className="App-main">
             {/* Show Full Shabad box if present */}
             {shabads.length > 0 && (
-              <div className="panel-header search-results" style={{ marginBottom: '2rem' }}>
-                <FullShabadDisplay 
-                  shabads={shabads}
-                  transcribedText={(() => {
-                    const combined = (transcribedText + ' ' + interimTranscript).trim();
-                    const words = combined.split(/\s+/);
-                    const last4Words = words.slice(-4).join(' ');
-                    return last4Words;
-                  })()}
-                  onNeedNextShabad={handleNeedNextShabad}
-                />
-              </div>
-            )}
-
-            {error && (
-              <div className="error-message">
-                ⚠️ {error}
-              </div>
+              <ErrorBoundary fallback={
+                <div className="error-message">
+                  <p>Failed to load shabad display. Please try refreshing the page.</p>
+                </div>
+              }>
+                <div className="panel-header search-results" style={{ marginBottom: '2rem' }}>
+                  <FullShabadDisplay 
+                    shabads={shabads}
+                    transcribedText={(() => {
+                      const combined = (transcribedText + ' ' + interimTranscript).trim();
+                      const words = combined.split(/\s+/);
+                      const last4Words = words.slice(-4).join(' ');
+                      return last4Words;
+                    })()}
+                    onNeedNextShabad={handleNeedNextShabad}
+                  />
+                  {isDataLoading && (
+                    <div style={{ marginTop: '1rem' }}>
+                      <LoadingState 
+                        message="Loading next shabad..." 
+                        size="small" 
+                        variant="dots"
+                      />
+                    </div>
+                  )}
+                </div>
+              </ErrorBoundary>
             )}
           </main>
         </div>
       </div>
-    </>
+    </ErrorBoundary>
   );
 }
 

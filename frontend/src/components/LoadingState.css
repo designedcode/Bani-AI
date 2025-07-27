@@ -1,0 +1,191 @@
+.loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  min-height: 100px;
+}
+
+.loading-state.inline {
+  display: inline-flex;
+  padding: 0;
+  min-height: auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.loading-message {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.loading-state.inline .loading-message {
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+/* Spinner Animation */
+.loading-spinner {
+  position: relative;
+}
+
+.spinner-ring {
+  border: 3px solid rgba(255, 255, 255, 0.1);
+  border-top: 3px solid #4CAF50;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.loading-spinner.small .spinner-ring {
+  width: 20px;
+  height: 20px;
+  border-width: 2px;
+}
+
+.loading-spinner.medium .spinner-ring {
+  width: 32px;
+  height: 32px;
+  border-width: 3px;
+}
+
+.loading-spinner.large .spinner-ring {
+  width: 48px;
+  height: 48px;
+  border-width: 4px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Dots Animation */
+.loading-dots {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.loading-dots .dot {
+  background: #4CAF50;
+  border-radius: 50%;
+  animation: bounce 1.4s ease-in-out infinite both;
+}
+
+.loading-dots.small .dot {
+  width: 6px;
+  height: 6px;
+}
+
+.loading-dots.medium .dot {
+  width: 8px;
+  height: 8px;
+}
+
+.loading-dots.large .dot {
+  width: 12px;
+  height: 12px;
+}
+
+.loading-dots .dot:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.loading-dots .dot:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+@keyframes bounce {
+  0%, 80%, 100% {
+    transform: scale(0);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Pulse Animation */
+.loading-pulse {
+  position: relative;
+}
+
+.pulse-circle {
+  background: #4CAF50;
+  border-radius: 50%;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.loading-pulse.small .pulse-circle {
+  width: 20px;
+  height: 20px;
+}
+
+.loading-pulse.medium .pulse-circle {
+  width: 32px;
+  height: 32px;
+}
+
+.loading-pulse.large .pulse-circle {
+  width: 48px;
+  height: 48px;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(0);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+/* Variants for different contexts */
+.loading-state.search {
+  min-height: 60px;
+  padding: 1rem;
+}
+
+.loading-state.data {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  margin: 1rem 0;
+}
+
+.loading-state.overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 100;
+}
+
+/* Button loading state */
+.loading-state.button {
+  padding: 0;
+  min-height: auto;
+}
+
+.loading-state.button .loading-content {
+  flex-direction: row;
+  gap: 0.5rem;
+}
+
+.loading-state.button .loading-message {
+  font-size: inherit;
+  color: inherit;
+}
