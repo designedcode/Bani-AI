@@ -1,24 +1,37 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-import json
+from pydantic import BaseModel
 import httpx
 from typing import List, Optional
 import logging
 import os
-import aiofiles
 from pathlib import Path
 import re
 import asyncio
 from collections import defaultdict
 import time
 import unicodedata
-from rapidfuzz import fuzz, process
-import html
+from rapidfuzz import fuzz
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Pydantic models for REST API
+class TranscriptionRequest(BaseModel):
+    text: str
+    confidence: float
+    session_id: Optional[str] = None
+
+class TranscriptionResponse(BaseModel):
+    transcribed_text: str
+    confidence: float
+    results: List[dict]
+    sggs_match_found: bool
+    fallback_used: bool
+    best_sggs_match: Optional[str]
+    best_sggs_score: Optional[float]
+    timestamp: float
 
 app = FastAPI(title="Bani AI Transcription", version="1.0.0")
 
@@ -81,33 +94,13 @@ def fuzzy_search_sggs(query: str, threshold: float = FUZZY_THRESHOLD):
     else:
         return [(best_line, best_score)] if best_line else []
 
-# WebSocket connection manager
-class ConnectionManager:
+# Session management for REST API
+session_store = {}
+
+class SessionData:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
-        # Track if a top result has been found per connection
-        self.top_result_found = {}
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        self.top_result_found[websocket] = False  # Reset on new connection
-        logger.info(f"Client connected. Total connections: {len(self.active_connections)}")
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-        if websocket in self.top_result_found:
-            del self.top_result_found[websocket]
-        logger.info(f"Client disconnected. Total connections: {len(self.active_connections)}")
-
-    async def send_personal_message(self, message: str, websocket: WebSocket):
-        await websocket.send_text(message)
-
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            await connection.send_text(message)
-
-manager = ConnectionManager()
+        self.top_result_found = False
+        self.search_history = []
 
 def strip_gurmukhi_matras(text: str) -> str:
     """
@@ -297,103 +290,79 @@ async def root():
 async def health_check():
     return {"status": "healthy", "service": "Bani AI Transcription"}
 
-@app.websocket("/ws/transcription")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        while True:
-            # Receive transcription data from frontend
-            data = await websocket.receive_text()
-            transcription_data = json.loads(data)
-            transcribed_text = transcription_data.get("text", "")
-            confidence = transcription_data.get("confidence", 0)
-            logger.info(f"Received transcription: {transcribed_text} (confidence: {confidence})")
+@app.post("/api/transcribe")
+async def transcribe_and_search(request: TranscriptionRequest) -> TranscriptionResponse:
+    """Process transcription and return search results"""
+    transcribed_text = request.text
+    confidence = request.confidence
+    
+    logger.info(f"Received transcription: {transcribed_text} (confidence: {confidence})")
 
-            # --- Stop further BaniDB search if top result found ---
-            if manager.top_result_found.get(websocket, False):
-                logger.info("Top result already found for this connection. Skipping BaniDB search and not sending further search_result messages.")
-                continue  # Do not send any search_result message
-
-            # Step 1: Fuzzy search SGGS.txt
-            fuzzy_matches = fuzzy_search_sggs(transcribed_text, FUZZY_THRESHOLD)
-            logger.info(f"Fuzzy search threshold: {FUZZY_THRESHOLD}")
-            sggs_match_found = False
-            fallback_used = False
-            best_sggs_match = None
-            best_sggs_score = None
-            search_results = []
-            if fuzzy_matches:
-                matched_line, score = fuzzy_matches[0]
-                best_sggs_match = matched_line
-                best_sggs_score = score
-                logger.info(f"Best fuzzy match: Score={score}, Line='{matched_line}'")
-                logger.info(f"Transcription: '{transcribed_text}' | Best SGGS line: '{matched_line}'")
-                if score >= FUZZY_THRESHOLD:
-                    sggs_match_found = True
-                    if matched_line is not None:
-                        verse = matched_line
-                        if '॥' in verse:
-                            verse = verse.split('॥')[0].strip()
-                        verse = unicodedata.normalize('NFC', verse)
-                        stripped_verse = strip_gurmukhi_matras(verse)
-                        logger.info(f"Stripped verse for BaniDB search: '{stripped_verse}' (from: '{verse}')")
-                        search_results = await search_banidb_api(stripped_verse)
-                        if search_results:
-                            manager.top_result_found[websocket] = True
-                        else:
-                            fallback_used = True
-                            logger.info(f"No results with searchtype=6, falling back to first letter search for: '{stripped_verse}'")
-                            fallback_first_letters = get_first_letters_search(verse)
-                            logger.info(f"Fallback first letters: '{fallback_first_letters}'")
-                            search_results = await search_banidb_api(fallback_first_letters, source="all", searchtype="1")
-                            if search_results:
-                                manager.top_result_found[websocket] = True
-                    else:
-                        logger.warning("No valid matched line found for fuzzy search.")
-                        fallback_used = True
-                        fallback_stripped = strip_gurmukhi_matras(transcribed_text)
-                        fallback_first_letters = get_first_letters_search(transcribed_text)
-                        logger.info(f"Fallback: Stripped='{fallback_stripped}', First letters='{fallback_first_letters}'")
-                        search_results = await search_banidb_api(fallback_first_letters, source="all", searchtype="1")
-                        if search_results:
-                            manager.top_result_found[websocket] = True
-                else:
-                    logger.info(f"Best match below threshold ({FUZZY_THRESHOLD}). No match used.")
+    # Step 1: Fuzzy search SGGS.txt
+    fuzzy_matches = fuzzy_search_sggs(transcribed_text, FUZZY_THRESHOLD)
+    logger.info(f"Fuzzy search threshold: {FUZZY_THRESHOLD}")
+    sggs_match_found = False
+    fallback_used = False
+    best_sggs_match = None
+    best_sggs_score = None
+    search_results = []
+    
+    if fuzzy_matches:
+        matched_line, score = fuzzy_matches[0]
+        best_sggs_match = matched_line
+        best_sggs_score = score
+        logger.info(f"Best fuzzy match: Score={score}, Line='{matched_line}'")
+        logger.info(f"Transcription: '{transcribed_text}' | Best SGGS line: '{matched_line}'")
+        
+        if score >= FUZZY_THRESHOLD:
+            sggs_match_found = True
+            if matched_line is not None:
+                verse = matched_line
+                if '॥' in verse:
+                    verse = verse.split('॥')[0].strip()
+                verse = unicodedata.normalize('NFC', verse)
+                stripped_verse = strip_gurmukhi_matras(verse)
+                logger.info(f"Stripped verse for BaniDB search: '{stripped_verse}' (from: '{verse}')")
+                search_results = await search_banidb_api(stripped_verse)
+                
+                if not search_results:
                     fallback_used = True
-                    fallback_stripped = strip_gurmukhi_matras(transcribed_text)
-                    fallback_first_letters = get_first_letters_search(transcribed_text)
-                    logger.info(f"Fallback: Stripped='{fallback_stripped}', First letters='{fallback_first_letters}'")
+                    logger.info(f"No results with searchtype=6, falling back to first letter search for: '{stripped_verse}'")
+                    fallback_first_letters = get_first_letters_search(verse)
+                    logger.info(f"Fallback first letters: '{fallback_first_letters}'")
                     search_results = await search_banidb_api(fallback_first_letters, source="all", searchtype="1")
-                    if search_results:
-                        manager.top_result_found[websocket] = True
             else:
-                logger.info("No fuzzy matches found at all.")
+                logger.warning("No valid matched line found for fuzzy search.")
                 fallback_used = True
                 fallback_stripped = strip_gurmukhi_matras(transcribed_text)
                 fallback_first_letters = get_first_letters_search(transcribed_text)
                 logger.info(f"Fallback: Stripped='{fallback_stripped}', First letters='{fallback_first_letters}'")
                 search_results = await search_banidb_api(fallback_first_letters, source="all", searchtype="1")
-                if search_results:
-                    manager.top_result_found[websocket] = True
+        else:
+            logger.info(f"Best match below threshold ({FUZZY_THRESHOLD}). No match used.")
+            fallback_used = True
+            fallback_stripped = strip_gurmukhi_matras(transcribed_text)
+            fallback_first_letters = get_first_letters_search(transcribed_text)
+            logger.info(f"Fallback: Stripped='{fallback_stripped}', First letters='{fallback_first_letters}'")
+            search_results = await search_banidb_api(fallback_first_letters, source="all", searchtype="1")
+    else:
+        logger.info("No fuzzy matches found at all.")
+        fallback_used = True
+        fallback_stripped = strip_gurmukhi_matras(transcribed_text)
+        fallback_first_letters = get_first_letters_search(transcribed_text)
+        logger.info(f"Fallback: Stripped='{fallback_stripped}', First letters='{fallback_first_letters}'")
+        search_results = await search_banidb_api(fallback_first_letters, source="all", searchtype="1")
 
-            # After setting top_result_found[websocket] = True, do not allow any further search for this connection
-            if manager.top_result_found.get(websocket, False):
-                logger.info("Top result found during this search. All future searches will be skipped for this connection.")
-
-            response = {
-                "type": "search_result",
-                "transcribed_text": transcribed_text,
-                "confidence": confidence,
-                "results": search_results,
-                "timestamp": time.time(),
-                "sggs_match_found": sggs_match_found,
-                "fallback_used": fallback_used,
-                "best_sggs_match": best_sggs_match,
-                "best_sggs_score": best_sggs_score
-            }
-            await manager.send_personal_message(json.dumps(response), websocket)
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
+    return TranscriptionResponse(
+        transcribed_text=transcribed_text,
+        confidence=confidence,
+        results=search_results,
+        sggs_match_found=sggs_match_found,
+        fallback_used=fallback_used,
+        best_sggs_match=best_sggs_match,
+        best_sggs_score=best_sggs_score,
+        timestamp=time.time()
+    )
 
 @app.get("/api/search")
 async def search_endpoint(query: str, source: str = "all"):

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🕉️ Starting Bani AI - Punjabi Audio Transcription & BaniDB Search"
+echo "🪯 Starting Bani AI - Punjabi Audio Transcription & BaniDB Search"
 echo "================================================================"
 
 # Check if Python is installed

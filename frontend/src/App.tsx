@@ -1,28 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './App.css';
-import TranscriptionPanel from './components/TranscriptionPanel';
-import SearchResults from './components/SearchResults';
-import AudioVisualizer from './components/AudioVisualizer';
 import FullShabadDisplay from './components/FullShabadDisplay';
 import LoadingOverlay from './components/LoadingOverlay';
 import StickyButtons from './components/StickyButtons';
 import MetadataPills from './components/MetadataPills';
-
-interface SearchResult {
-  gurmukhi_text: string;
-  english_translation: string;
-  line_number: number;
-  page_number: number;
-  source?: string;
-  writer?: string;
-  raag?: string;
-  shabad_id: string;
-}
-
-interface TranscriptionData {
-  text: string;
-  confidence: number;
-}
+import { transcriptionService } from './services/transcriptionService';
 
 // Custom hook for real-time audio volume detection
 function useMicVolume(autoStart: boolean) {
@@ -85,30 +67,18 @@ function useMicVolume(autoStart: boolean) {
 }
 
 function App() {
-  const [isListening, setIsListening] = useState(false);
+  const [, setIsListening] = useState(false);
   const [transcribedText, setTranscribedText] = useState('');
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
   const [error, setError] = useState<string>('');
-  const [sggsMatchFound, setSggsMatchFound] = useState<boolean | null>(null);
-  const [fallbackUsed, setFallbackUsed] = useState<boolean | null>(null);
-  const [bestSggsMatch, setBestSggsMatch] = useState<string | null>(null);
-  const [bestSggsScore, setBestSggsScore] = useState<number | null>(null);
   const [shabads, setShabads] = useState<any[]>([]);
-  const [searchTriggered, setSearchTriggered] = useState(false);
+  const [searchTriggered] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState('');
-  const [lastSearchQuery, setLastSearchQuery] = useState('');
-  const [lastSearchResults, setLastSearchResults] = useState<SearchResult[]>([]);
   const [lastSggsMatchFound, setLastSggsMatchFound] = useState<boolean | null>(null);
-  const [lastFallbackUsed, setLastFallbackUsed] = useState<boolean | null>(null);
   const [lastBestSggsMatch, setLastBestSggsMatch] = useState<string | null>(null);
-  const [lastBestSggsScore, setLastBestSggsScore] = useState<number | null>(null);
   const [showLoader, setShowLoader] = useState(true);
-  const [noSpeechCount, setNoSpeechCount] = useState(0);
   const [userMessage, setUserMessage] = useState('');
-  const MAX_NO_SPEECH_RETRIES = 3;
-  
-  const websocketRef = useRef<WebSocket | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSentTextRef = useRef<string>('');
@@ -118,31 +88,57 @@ function App() {
   const MATCH_DISPLAY_DELAY = 1800; // ms
   const recognitionManuallyStoppedRef = useRef(false);
 
-  // Debounced function to send transcription data
-  const debouncedSendTranscription = useCallback((text: string, confidence: number) => {
+  // Debounced function to send transcription data via HTTP
+  const debouncedSendTranscription = useCallback(async (text: string, confidence: number) => {
     // Clear existing timeout
     if (debounceTimeoutRef.current) {
       clearTimeout(debounceTimeoutRef.current);
     }
 
-    // Don't send if it's the same as last sent text
-    if (text === lastSentTextRef.current) {
+    // Don't send if it's the same as last sent text or if already processing
+    if (text === lastSentTextRef.current || isProcessing) {
       return;
     }
 
     // Set new timeout
-    debounceTimeoutRef.current = setTimeout(() => {
+    debounceTimeoutRef.current = setTimeout(async () => {
       if (shabads.length > 0 || searchTriggered) return;
-      if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-        const transcriptionData: TranscriptionData = {
-          text: text,
-          confidence: confidence
-        };
-        websocketRef.current.send(JSON.stringify(transcriptionData));
+
+      try {
+        setIsProcessing(true);
+        setError('');
+
+        const response = await transcriptionService.transcribeAndSearch(text, confidence);
+
+        // Update state with response - only keep what we actually use
+        if (response.results && response.results.length > 0) {
+          setLastSggsMatchFound(response.sggs_match_found);
+          setLastBestSggsMatch(response.best_sggs_match);
+
+          // Fetch full shabad if not already loaded
+          const newShabadId = response.results[0].shabad_id;
+          if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
+            shabadsBeingFetched.current.add(newShabadId);
+            try {
+              const shabadData = await transcriptionService.getFullShabad(newShabadId);
+              setShabads(prev => [...prev, shabadData]);
+            } catch (err) {
+              console.error('Error fetching full shabad:', err);
+            } finally {
+              shabadsBeingFetched.current.delete(newShabadId);
+            }
+          }
+        }
+
         lastSentTextRef.current = text;
+      } catch (err) {
+        console.error('Transcription error:', err);
+        setError('Failed to process transcription');
+      } finally {
+        setIsProcessing(false);
       }
     }, 300); // 300ms debounce delay
-  }, [shabads, searchTriggered]);
+  }, [shabads, searchTriggered, isProcessing]);
 
   // Fix: Clear debounce timer when fullShabad is set
   useEffect(() => {
@@ -151,83 +147,14 @@ function App() {
     }
   }, [shabads]);
 
-  // Initialize WebSocket connection
+  // Cleanup on unmount
   useEffect(() => {
-    const connectWebSocket = () => {
-      setConnectionStatus('connecting');
-      
-      const ws = new WebSocket('ws://localhost:8000/ws/transcription');
-      
-      ws.onopen = () => {
-        setConnectionStatus('connected');
-        setError('');
-        console.log('WebSocket connected');
-      };
-      
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'search_result') {
-            setSearchResults(data.results);
-            setSggsMatchFound(data.sggs_match_found ?? null);
-            setFallbackUsed(data.fallback_used ?? null);
-            setBestSggsMatch(data.best_sggs_match ?? null);
-            setBestSggsScore(data.best_sggs_score ?? null);
-            // Only update last* states if results are present (i.e., a search actually happened)
-            if (data.results && data.results.length > 0) {
-              setLastSearchQuery(data.transcribed_text);
-              setLastSearchResults(data.results);
-              setLastSggsMatchFound(data.sggs_match_found ?? null);
-              setLastFallbackUsed(data.fallback_used ?? null);
-              setLastBestSggsMatch(data.best_sggs_match ?? null);
-              setLastBestSggsScore(data.best_sggs_score ?? null);
-            }
-            // Only fetch full shabad if not already loaded
-            if (data.results && data.results.length > 0 && data.results[0].shabad_id) {
-              const newShabadId = data.results[0].shabad_id;
-              if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
-                shabadsBeingFetched.current.add(newShabadId);
-                fetch(`/api/full-shabad?shabadId=${newShabadId}`)
-                  .then(res => res.json())
-                  .then(data => {
-                    setShabads(prev => [...prev, data]);
-                  })
-                  .finally(() => {
-                    shabadsBeingFetched.current.delete(newShabadId);
-                  });
-              }
-            }
-          }
-        } catch (err) {
-          console.error('Error parsing WebSocket message:', err);
-        }
-      };
-      
-      ws.onclose = () => {
-        setConnectionStatus('disconnected');
-        console.log('WebSocket disconnected');
-      };
-      
-      ws.onerror = (error) => {
-        setConnectionStatus('disconnected');
-        setError('WebSocket connection failed');
-        console.error('WebSocket error:', error);
-      };
-      
-      websocketRef.current = ws;
-    };
-
-    connectWebSocket();
-
     return () => {
-      if (websocketRef.current) {
-        websocketRef.current.close();
-      }
       if (debounceTimeoutRef.current) {
         clearTimeout(debounceTimeoutRef.current);
       }
     };
-  }, []);
+  }, [debouncedSendTranscription]);
 
   // Initialize speech recognition
   useEffect(() => {
@@ -264,7 +191,7 @@ function App() {
           const updated = prev + newTranscript;
           const fullTranscript = (updated + interim).trim();
           const wordCount = fullTranscript.split(/\s+/).length;
-          
+
           // Backend: Only send when word count >= 8, and send the full transcription
           if (wordCount >= 8) {
             debouncedSendTranscription(fullTranscript, maxConfidence);
@@ -282,7 +209,7 @@ function App() {
             setTimeout(() => {
               try {
                 recognition.start();
-              } catch (e) {}
+              } catch (e) { }
             }, 800);
           }
         } else if (event.error === 'aborted') {
@@ -294,7 +221,7 @@ function App() {
             setTimeout(() => {
               try {
                 recognition.start();
-              } catch (e) {}
+              } catch (e) { }
             }, 1200);
           }
         }
@@ -308,7 +235,7 @@ function App() {
           setTimeout(() => {
             try {
               recognition.start();
-            } catch (e) {}
+            } catch (e) { }
           }, 800);
         }
       };
@@ -321,7 +248,7 @@ function App() {
         recognitionRef.current.abort();
       }
     };
-  }, []);
+  }, [debouncedSendTranscription]);
 
   // Hide loader as soon as a shabad is found
   useEffect(() => {
@@ -366,40 +293,10 @@ function App() {
     }
   }, []);
 
-  const startListening = () => {
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.start();
-      } catch (error) {
-        console.error('Error starting speech recognition:', error);
-        setError('Failed to start speech recognition');
-      }
-    }
-  };
-
-  const pauseListening = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.abort();
-    }
-    setIsListening(false);
-    recognitionManuallyStoppedRef.current = true;
-  };
-
-  const stopListeningAndClear = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.abort();
-    }
-    setIsListening(false);
-    recognitionManuallyStoppedRef.current = true;
-    setTranscribedText('');
-    setInterimTranscript('');
-    setSearchResults([]);
-    setShabads([]);
-    setSearchTriggered(false);
-  };
+  // Control functions removed - auto-restart handles everything
 
   // Callback to fetch next shabad
-  const handleNeedNextShabad = () => {
+  const handleNeedNextShabad = async () => {
     const lastShabad = shabads[shabads.length - 1];
     const nextShabadId = lastShabad?.navigation?.next;
     if (
@@ -408,14 +305,14 @@ function App() {
       !shabadsBeingFetched.current.has(nextShabadId)
     ) {
       shabadsBeingFetched.current.add(nextShabadId);
-      fetch(`/api/full-shabad?shabadId=${nextShabadId}`)
-        .then(res => res.json())
-        .then(data => {
-          setShabads(prev => [...prev, data]);
-        })
-        .finally(() => {
-          shabadsBeingFetched.current.delete(nextShabadId);
-        });
+      try {
+        const data = await transcriptionService.getFullShabad(nextShabadId);
+        setShabads(prev => [...prev, data]);
+      } catch (err) {
+        console.error('Error fetching next shabad:', err);
+      } finally {
+        shabadsBeingFetched.current.delete(nextShabadId);
+      }
     }
   };
 
@@ -433,13 +330,11 @@ function App() {
               </div>
             )}
             <div className="connection-status">
-              <span className={`status-indicator ${connectionStatus}`}>
-                {connectionStatus === 'connected' ? '🟢' : 
-                 connectionStatus === 'connecting' ? '🟡' : '🔴'}
+              <span className={`status-indicator ${isProcessing ? 'connecting' : error ? 'disconnected' : 'connected'}`}>
+                {isProcessing ? '🟡' : error ? '🔴' : '🟢'}
               </span>
               <span className="status-text">
-                {connectionStatus === 'connected' ? 'Connected to BaniDB API' : 
-                 connectionStatus === 'connecting' ? 'Connecting...' : 'Disconnected'}
+                {isProcessing ? 'Processing...' : error ? `Error: ${error}` : 'Ready for transcription'}
               </span>
             </div>
           </header>
@@ -462,7 +357,7 @@ function App() {
             {/* Show Full Shabad box if present */}
             {shabads.length > 0 && (
               <div className="panel-header search-results" style={{ marginBottom: '2rem' }}>
-                <FullShabadDisplay 
+                <FullShabadDisplay
                   shabads={shabads}
                   transcribedText={(() => {
                     const combined = (transcribedText + ' ' + interimTranscript).trim();
