@@ -7,7 +7,7 @@ Bani AI is a real-time Punjabi audio transcription and search system. Its core g
 - Support for live microphone input
 - Integration with BaniDB for searching Gurbani verses
 - Intelligent matra (diacritic) stripping for improved search accuracy
-- Real-time frontend-backend communication using WebSockets
+- HTTP REST API communication between frontend and backend
 - Modern, user-friendly web interface
 - Display of search results with Gurmukhi text, English translations, verse IDs, and source info
 

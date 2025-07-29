@@ -8,14 +8,14 @@ A real-time Punjabi audio transcription system that transcribes audio in Gurmukh
 - **File Upload Support**: Upload audio files for transcription
 - **BaniDB Integration**: Search transcribed text in the Gurbani database
 - **Matra Stripping**: Intelligently strips Gurmukhi matras for better search results
-- **WebSocket Communication**: Real-time updates between frontend and backend
+- **REST API Communication**: HTTP-based communication between frontend and backend
 - **Modern UI**: React-based frontend with drag-and-drop file upload
 
 ## Tech Stack
 
 - **Backend**: FastAPI (Python)
 - **Frontend**: React with TypeScript
-- **Real-time**: WebSocket
+- **Communication**: REST API
 - **Database**: BaniDB API (external)
 - **Audio Processing**: Web Speech API
 
@@ -92,7 +92,7 @@ chmod +x start.sh
 - `GET /api/search` - Search BaniDB
 - `GET /api/sources` - Get available sources
 - `GET /api/strip-matras` - Test matra stripping
-- `WebSocket /ws/transcription` - Real-time transcription
+- `POST /api/transcribe` - Process transcription and return search results
 
 ## Project Structure
 
