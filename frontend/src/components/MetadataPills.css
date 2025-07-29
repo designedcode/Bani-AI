@@ -1,0 +1,47 @@
+.metadata-pills-row {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  z-index: 2001;
+}
+
+.pill {
+  display: inline-block;
+  padding: 0.25rem 1rem;
+  border-radius: 2rem;
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  background: transparent;
+  border: 2px solid;
+  transition: background 0.2s, color 0.2s, border 0.2s;
+  user-select: none;
+}
+
+.pill-raag {
+  color: #4ea1f7;
+  border-color: #295b8e;
+  background: rgba(46, 104, 170, 0.08);
+}
+
+.pill-writer {
+  color: #7b7be6;
+  border-color: #3a3a7c;
+  background: rgba(60, 60, 120, 0.13);
+}
+
+.pill-page {
+  color: #7b8794;
+  border-color: #3a4147;
+  background: rgba(60, 65, 71, 0.13);
+}
+
+@media (max-width: 700px) {
+  .metadata-pills-row {
+    gap: 0.6rem;
+  }
+  .pill {
+    font-size: 0.85rem;
+    padding: 0.2rem 0.7rem;
+  }
+} 

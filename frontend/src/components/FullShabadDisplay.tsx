@@ -191,14 +191,15 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
     );
     const result = progressiveFuzzySearch(transcribedText, gurmukhiLines, highlightedLineIndex);
     if (result) {
-      setHighlightedLineIndex(result.bestLineIndex);
+      const newHighlightedIndex = result.bestLineIndex;
+      setHighlightedLineIndex(newHighlightedIndex);
       // If at second last or last line of last shabad, trigger fetch for next shabad
       const lastShabad = shabads[shabads.length - 1];
       const lastShabadStartIdx = allLines.findIndex(l => l.shabadIndex === shabads.length - 1 && l.lineIndex === 0);
       const lastShabadLines = (lastShabad?.lines_highlighted || []).length;
       if (
-        (result.bestLineIndex === lastShabadStartIdx + lastShabadLines - 2 ||
-         result.bestLineIndex === lastShabadStartIdx + lastShabadLines - 1) &&
+        (newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 2 ||
+         newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 1) &&
         lastShabad.shabad_id
       ) {
         onNeedNextShabad();
@@ -206,72 +207,71 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
     }
   }, [shabads, transcribedText]);
 
-  // Auto-scroll to highlighted verse
+  // Smooth scroll highlighted line into center
   useEffect(() => {
     if (highlightedLineIndex !== null && lineRefs.current[highlightedLineIndex]) {
-      lineRefs.current[highlightedLineIndex]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const el = lineRefs.current[highlightedLineIndex];
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        const absoluteElementTop = rect.top + window.pageYOffset;
+        // Adjust for sticky header height (e.g., 80px) and some margin
+        const header = document.querySelector('.sticky-header-row');
+        const headerHeight = header ? header.getBoundingClientRect().height : 0;
+        const offset = absoluteElementTop - (window.innerHeight / 2) + (rect.height / 2) - headerHeight / 2;
+        window.scrollTo({ top: offset, behavior: 'smooth' });
+      }
     }
   }, [highlightedLineIndex]);
 
-  // Render all shabads with divider
-  let currentShabadIdx = -1;
-  return (
-    <div>
-      {allLines.map(({ line, shabadIndex, lineIndex }, idx) => {
-        let divider = null;
-        let shabadHeader = null;
-        if (shabadIndex !== currentShabadIdx) {
-          currentShabadIdx = shabadIndex;
-          const shabad = shabads[shabadIndex];
-          if (shabadIndex > 0) {
-            divider = <div style={{ borderTop: '2px solid #ccc', margin: '2rem 0' }} />;
-          }
-          shabadHeader = (
-            <div className="shabad-header" style={{ margin: '1rem 0', padding: '0.5rem', background: '#f5f5f5', borderRadius: '8px' }}>
-              {shabad.raag && <div className="shabad-raag"><b>Raag:</b> {shabad.raag}</div>}
-              {shabad.writer && <div className="shabad-writer"><b>Writer:</b> {shabad.writer}</div>}
-              {shabad.shabad_name && <div className="shabad-title"><b>Title:</b> {shabad.shabad_name}</div>}
-              {shabad.page_no && <div className="shabad-page"><b>Page:</b> {shabad.page_no}</div>}
-              {shabad.source && <div className="shabad-source"><b>Source:</b> {shabad.source}</div>}
-            </div>
-          );
-        }
-        const isHighlighted = idx === highlightedLineIndex;
-        return (
-          <React.Fragment key={`shabad${shabadIndex}-line${lineIndex}`}>
-            {divider}
-            {shabadHeader}
+  // Get line styling class based on position relative to highlighted line
+  const getLineClass = (lineIndex: number) => {
+    if (highlightedLineIndex === null) return 'shabad-line standard';
+    if (lineIndex === highlightedLineIndex) {
+      return 'shabad-line highlighted';
+    } else if (lineIndex === highlightedLineIndex - 1) {
+      return 'shabad-line context previous';
+    } else if (lineIndex === highlightedLineIndex + 1) {
+      return 'shabad-line context next';
+    } else {
+      return 'shabad-line standard';
+    }
+  };
+
+  // Render unified view with all lines
+  const renderUnifiedView = () => {
+    return (
+      <div className="unified-shabad-display">
+        {allLines.map(({ line, shabadIndex, lineIndex }, idx) => {
+          // No shabadHeader or divider
+          return (
             <div
+              key={`shabad${shabadIndex}-line${lineIndex}`}
               ref={el => (lineRefs.current[idx] = el)}
-              className={`gurmukhi-line${isHighlighted ? ' highlighted' : ''}`}
-              style={{
-                background: isHighlighted ? '#fff' : undefined,
-                borderRadius: isHighlighted ? '6px' : undefined,
-                padding: '0.5rem',
-                marginBottom: '0.5rem',
-                border: isHighlighted ? '2px solid #43a047' : '1px solid #eee',
-                fontWeight: isHighlighted ? 700 : 400,
-                fontSize: '1.2rem',
-                boxShadow: isHighlighted ? '0 0 8px #43a04733' : undefined,
-              }}
+              className={getLineClass(idx)}
             >
-              <div className="gurmukhi-text" style={{ fontFamily: 'Noto Sans Gurmukhi, serif', fontSize: '1.2em', color: isHighlighted ? '#43a047' : undefined }}>
+              <div className="gurmukhi-text">
                 {line.gurmukhi_highlighted || line.gurmukhi_original}
               </div>
               {line.transliteration && (
-                <div className="transliteration" style={{ color: '#555', fontSize: '1em', marginTop: '0.2em' }}>
-                  <b>Transliteration:</b> {line.transliteration}
+                <div className="transliteration">
+                  {line.transliteration}
                 </div>
               )}
               {line.translation && (
-                <div className="translation" style={{ color: '#1976d2', fontSize: '1em', marginTop: '0.2em' }}>
-                  <b>Translation:</b> {line.translation}
+                <div className="translation">
+                  {line.translation}
                 </div>
               )}
             </div>
-          </React.Fragment>
-        );
-      })}
+          );
+        })}
+      </div>
+    );
+  };
+
+  return (
+    <div className="shabad-display-container">
+      {renderUnifiedView()}
     </div>
   );
 };
