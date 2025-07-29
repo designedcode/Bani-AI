@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fuzzy Search Comparison Tool</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            padding: 30px;
+        }
+
+        .left-panel,
+        .right-panel {
+            background: #f8fafc;
+            border-radius: 10px;
+            padding: 25px;
+        }
+
+        .section-title {
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 10px;
+        }
+
+        .audio-controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 25px;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 1rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(59, 130, 246, 0.3);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(239, 68, 68, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .transcription-display {
+            background: white;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 25px;
+            min-height: 100px;
+            font-size: 1.1rem;
+            line-height: 1.6;
+        }
+
+        .transcription-display.listening {
+            border-color: #3b82f6;
+            background: #eff6ff;
+        }
+
+        .weights-container {
+            display: grid;
+            gap: 20px;
+        }
+
+        .weight-control {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .weight-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .weight-name {
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .weight-value {
+            background: #3b82f6;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .weight-slider {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #e2e8f0;
+            outline: none;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+
+        .weight-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .weight-slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .results-container {
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .result-item {
+            padding: 20px;
+            border-bottom: 1px solid #f1f5f9;
+            transition: background-color 0.2s ease;
+        }
+
+        .result-item:hover {
+            background: #f8fafc;
+        }
+
+        .result-item:last-child {
+            border-bottom: none;
+        }
+
+        .result-text {
+            font-size: 1.1rem;
+            line-height: 1.6;
+            margin-bottom: 10px;
+            color: #1e293b;
+        }
+
+        .result-scores {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+
+        .score-badge {
+            background: #f1f5f9;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .score-badge.weighted {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+        }
+
+        .result-meta {
+            font-size: 0.9rem;
+            color: #64748b;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-listening {
+            background: #3b82f6;
+            animation: pulse 2s infinite;
+        }
+
+        .status-processing {
+            background: #f59e0b;
+            animation: pulse 2s infinite;
+        }
+
+        .status-ready {
+            background: #10b981;
+        }
+
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+
+            100% {
+                opacity: 1;
+            }
+        }
+
+        .history-section,
+        .export-section {
+            grid-column: 1 / -1;
+            margin-top: 30px;
+            background: #f8fafc;
+            border-radius: 10px;
+            padding: 25px;
+        }
+
+        .history-item {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .history-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .history-transcription {
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 8px;
+        }
+
+        .history-result {
+            color: #64748b;
+            font-size: 0.95rem;
+            margin-bottom: 8px;
+        }
+
+        .history-weights {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .history-weight {
+            background: #e2e8f0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.8rem;
+        }
+
+        .export-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 30px;
+        }
+
+        .export-description {
+            flex: 1;
+        }
+
+        .export-description p {
+            color: #64748b;
+            font-size: 1rem;
+            line-height: 1.6;
+        }
+
+        .export-actions {
+            display: flex;
+            gap: 15px;
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+                gap: 20px;
+                padding: 20px;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .audio-controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 Fuzzy Search Comparison Tool</h1>
+            <p>Compare RapidFuzz methods for SGGS text matching with real-time audio transcription</p>
+        </div>
+
+        <div class="main-content">
+            <div class="left-panel">
+                <h2 class="section-title">🎤 Audio Input & Transcription</h2>
+
+                <div class="audio-controls">
+                    <button id="startBtn" class="btn btn-primary">
+                        <span class="status-indicator status-ready"></span>
+                        Start Listening
+                    </button>
+                    <button id="stopBtn" class="btn btn-danger" disabled>
+                        Stop Listening
+                    </button>
+                    <button id="logModeBtn" class="btn" style="background: #6b7280; color: white;">
+                        📝 DB Log: OFF
+                    </button>
+                </div>
+                
+                <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 15px; text-align: center;">
+                    💡 Your browser may ask for microphone permission on first use<br>
+                    🔍 Toggle Log Mode to see detailed score logging in console
+                </div>
+
+                <div id="transcriptionDisplay" class="transcription-display">
+                    Click "Start Listening" to begin audio transcription...
+                </div>
+
+                <h2 class="section-title">⚖️ Fuzzy Search Weights</h2>
+
+                <div class="weights-container">
+                    <div class="weight-control">
+                        <div class="weight-label">
+                            <span class="weight-name">Ratio</span>
+                            <span class="weight-value" id="ratioValue">0.2</span>
+                        </div>
+                        <input type="range" id="ratioSlider" class="weight-slider" min="0" max="1" step="0.1"
+                            value="0.2">
+                    </div>
+
+                    <div class="weight-control">
+                        <div class="weight-label">
+                            <span class="weight-name">Partial Ratio</span>
+                            <span class="weight-value" id="partialRatioValue">0.2</span>
+                        </div>
+                        <input type="range" id="partialRatioSlider" class="weight-slider" min="0" max="1" step="0.1"
+                            value="0.2">
+                    </div>
+
+                    <div class="weight-control">
+                        <div class="weight-label">
+                            <span class="weight-name">Token Sort Ratio</span>
+                            <span class="weight-value" id="tokenSortValue">0.0</span>
+                        </div>
+                        <input type="range" id="tokenSortSlider" class="weight-slider" min="0" max="1" step="0.1"
+                            value="0.0">
+                    </div>
+
+                    <div class="weight-control">
+                        <div class="weight-label">
+                            <span class="weight-name">Token Set Ratio</span>
+                            <span class="weight-value" id="tokenSetValue">0.6</span>
+                        </div>
+                        <input type="range" id="tokenSetSlider" class="weight-slider" min="0" max="1" step="0.1"
+                            value="0.6">
+                    </div>
+
+                    <div class="weight-control">
+                        <div class="weight-label">
+                            <span class="weight-name">WRatio</span>
+                            <span class="weight-value" id="wratioValue">0.0</span>
+                        </div>
+                        <input type="range" id="wratioSlider" class="weight-slider" min="0" max="1" step="0.1"
+                            value="0.0">
+                    </div>
+                </div>
+            </div>
+
+            <div class="right-panel">
+                <h2 class="section-title">🔍 Search Results</h2>
+                <div id="resultsContainer" class="results-container">
+                    <div style="padding: 40px; text-align: center; color: #64748b;">
+                        Results will appear here after transcription...
+                    </div>
+                </div>
+            </div>
+
+            <div class="history-section">
+                <h2 class="section-title">📊 Comparison History</h2>
+                <div id="historyContainer">
+                    <div style="padding: 20px; text-align: center; color: #64748b;">
+                        Comparison history will appear here...
+                    </div>
+                </div>
+            </div>
+
+            <div class="export-section">
+                <h2 class="section-title">📊 Data Export</h2>
+                
+                <div class="export-controls">
+                    <div class="export-description">
+                        <p>Export all comparison history data including individual method scores for offline analysis.</p>
+                    </div>
+                    
+                    <div class="export-actions">
+                        <button id="exportHistoryBtn" class="btn btn-primary">Export History Data</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
