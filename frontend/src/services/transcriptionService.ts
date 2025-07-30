@@ -1,5 +1,8 @@
 // Transcription service for REST API communication
 
+// Import BaniDB types from the service
+import { BaniDBSearchResult, banidbService } from './banidbService';
+
 export interface TranscriptionRequest {
   text: string;
   confidence: number;
@@ -9,9 +12,7 @@ export interface TranscriptionRequest {
 export interface TranscriptionResponse {
   transcribed_text: string;
   confidence: number;
-  results: SearchResult[];
   sggs_match_found: boolean;
-  fallback_used: boolean;
   best_sggs_match: string | null;
   best_sggs_score: number | null;
   timestamp: number;
@@ -27,6 +28,11 @@ export interface SearchResult {
   raag: string;
 }
 
+export interface FullTranscriptionResponse extends TranscriptionResponse {
+  results: SearchResult[];
+  fallback_used: boolean;
+}
+
 class TranscriptionService {
   private baseUrl: string;
   private sessionId: string;
@@ -37,10 +43,10 @@ class TranscriptionService {
   }
 
   private generateSessionId(): string {
-    return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return `session_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
   }
 
-  async transcribeAndSearch(text: string, confidence: number): Promise<TranscriptionResponse> {
+  async transcribeAndSearch(text: string, confidence: number): Promise<FullTranscriptionResponse> {
     const request: TranscriptionRequest = {
       text,
       confidence,
@@ -48,6 +54,7 @@ class TranscriptionService {
     };
 
     try {
+      // Step 1: Get SGGS fuzzy match from backend
       const response = await fetch(`${this.baseUrl}/api/transcribe`, {
         method: 'POST',
         headers: {
@@ -60,12 +67,55 @@ class TranscriptionService {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data: TranscriptionResponse = await response.json();
-      return data;
+      const backendData: TranscriptionResponse = await response.json();
+
+      // Step 2: If we have a good SGGS match, search BaniDB with it
+      let results: SearchResult[] = [];
+      let fallbackUsed = false;
+
+      if (backendData.sggs_match_found && backendData.best_sggs_match) {
+        console.log(`Using SGGS match: ${backendData.best_sggs_match}`);
+        const banidbResponse = await banidbService.searchFromSGGSLine(backendData.best_sggs_match);
+        results = banidbResponse.results.map(this.mapBaniDBResult);
+        fallbackUsed = banidbResponse.fallbackUsed;
+      } else {
+        // Fallback: search BaniDB directly with transcribed text
+        console.log(`No good SGGS match, searching BaniDB directly with: ${text}`);
+        const directResults = await banidbService.searchFromSGGSLine(text);
+        results = directResults.results.map(this.mapBaniDBResult);
+        fallbackUsed = true;
+      }
+
+      // If no results found, refresh the page
+      if (results.length === 0) {
+        console.log('No transcription results found, refreshing page...');
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000); // Small delay to show any loading state
+        throw new Error('No results found - page will refresh');
+      }
+
+      return {
+        ...backendData,
+        results,
+        fallback_used: fallbackUsed
+      };
     } catch (error) {
       console.error('Transcription service error:', error);
       throw error;
     }
+  }
+
+  private mapBaniDBResult(banidbResult: BaniDBSearchResult): SearchResult {
+    return {
+      gurmukhi_text: banidbResult.gurmukhi_text,
+      english_translation: banidbResult.english_translation,
+      verse_id: banidbResult.verse_id,
+      shabad_id: banidbResult.shabad_id,
+      source: banidbResult.source,
+      writer: banidbResult.writer,
+      raag: banidbResult.raag
+    };
   }
 
 

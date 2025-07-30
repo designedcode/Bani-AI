@@ -141,10 +141,18 @@ function App() {
       }
     } catch (err) {
       console.error('Transcription error:', err);
-      setError('Failed to process transcription');
-      // Reset the flag on error so user can try again
-      transcriptionSentRef.current = false;
-      wordCountTriggeredRef.current = false;
+
+      // Check if this is a "no results" error that will trigger page refresh
+      if (err instanceof Error && err.message.includes('No results found - page will refresh')) {
+        // Don't show error message, just let the page refresh happen
+        setUserMessage('No results found. Refreshing...');
+        console.log('Page refresh triggered due to no results');
+      } else {
+        setError('Failed to process transcription');
+        // Reset the flag on error so user can try again
+        transcriptionSentRef.current = false;
+        wordCountTriggeredRef.current = false;
+      }
     } finally {
       setIsProcessing(false);
     }
