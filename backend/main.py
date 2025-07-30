@@ -50,7 +50,7 @@ SGGS_LINES = []
 INVERTED_INDEX = {}
 SGGS_LOADED = False
 INVERTED_INDEX_LOADED = False
-FUZZY_THRESHOLD = float(os.getenv("FUZZY_MATCH_THRESHOLD", "40"))
+FUZZY_THRESHOLD = float(os.getenv("FUZZY_MATCH_THRESHOLD", "70"))
 
 # Async loading of SGGSO.txt
 async def load_sggs_data():
@@ -113,9 +113,20 @@ def get_candidate_lines_from_index(query: str) -> set:
     logger.info(f"Inverted index: Found {words_found}/{len(words)} words, {len(candidate_lines)} candidate lines")
     return candidate_lines
 
+def weighted_fuzzy_score(query: str, line: str) -> float:
+    """Calculate weighted fuzzy score using multiple methods
+    Weights: 0.4 * partial_ratio + 0.3 * token_set_ratio + 0.3 * ratio
+    """
+    partial = fuzz.partial_ratio(query, line)
+    token_set = fuzz.token_set_ratio(query, line)
+    ratio = fuzz.ratio(query, line)
+    
+    weighted_score = 0.4 * partial + 0.3 * token_set + 0.3 * ratio
+    return weighted_score
+
 @lru_cache(maxsize=1000)
 def fuzzy_search_sggs(query: str, threshold: float = FUZZY_THRESHOLD):
-    """Two-stage fuzzy search: inverted index filtering + fuzzy matching"""
+    """Two-stage fuzzy search: inverted index filtering + weighted fuzzy matching"""
     print(f"DEBUG: SGGS_LOADED={SGGS_LOADED}, INVERTED_INDEX_LOADED={INVERTED_INDEX_LOADED}, query='{query}'")
     if not SGGS_LOADED or not query.strip():
         print("DEBUG: Not loaded or empty query")
@@ -134,16 +145,16 @@ def fuzzy_search_sggs(query: str, threshold: float = FUZZY_THRESHOLD):
                 if 1 <= line_num <= len(SGGS_LINES):
                     candidate_lines.append(SGGS_LINES[line_num - 1])
             
-            print(f"DEBUG: Processing {len(candidate_lines)} candidate lines")
+            print(f"DEBUG: Processing {len(candidate_lines)} candidate lines with weighted scoring")
             
-            # Fuzzy search on candidates only
+            # Weighted fuzzy search on candidates only
             best_score = -1
             best_line = None
             
             for line in candidate_lines:
-                score = fuzz.ratio(query, line)
+                score = weighted_fuzzy_score(query, line)
                 if score >= 95:  # Early termination for excellent matches
-                    print(f"DEBUG: Early termination! Score={score}, Line='{line}'")
+                    print(f"DEBUG: Early termination! Weighted Score={score:.2f}, Line='{line}'")
                     return [(line, score)]
                 if score > best_score:
                     best_score = score
@@ -151,28 +162,28 @@ def fuzzy_search_sggs(query: str, threshold: float = FUZZY_THRESHOLD):
             
             # Return best candidate match if above threshold
             if best_score >= threshold:
-                print(f"DEBUG: Best candidate score={best_score}, Line='{best_line}'")
+                print(f"DEBUG: Best candidate weighted score={best_score:.2f}, Line='{best_line}'")
                 return [(best_line, best_score)]
             elif best_score >= 55:  # Still return decent matches
-                print(f"DEBUG: Decent candidate score={best_score}, Line='{best_line}'")
+                print(f"DEBUG: Decent candidate weighted score={best_score:.2f}, Line='{best_line}'")
                 return [(best_line, best_score)]
     
     # Stage 2: Fallback to full-scan approach (FALLBACK)
-    print("DEBUG: Using fallback full-scan approach")
+    print("DEBUG: Using fallback full-scan approach with weighted scoring")
     best_score = -1
     best_line = None
     
     for line in SGGS_LINES:
-        score = fuzz.ratio(query, line)
+        score = weighted_fuzzy_score(query, line)
         if score >= 95:  # Early termination for excellent matches
-            print(f"DEBUG: Fallback early termination! Score={score}, Line='{line}'")
+            print(f"DEBUG: Fallback early termination! Weighted Score={score:.2f}, Line='{line}'")
             return [(line, score)]
         if score > best_score:
             best_score = score
             best_line = line
     
     # Return best fallback match
-    print(f"DEBUG: Fallback best score={best_score}, Best line='{best_line}'")
+    print(f"DEBUG: Fallback best weighted score={best_score:.2f}, Best line='{best_line}'")
     if best_score >= threshold:
         return [(best_line, best_score)]
     elif best_score >= 55:  # Still return decent matches
