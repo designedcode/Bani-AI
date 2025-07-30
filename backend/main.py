@@ -49,50 +49,72 @@ BANIDB_API_BASE_URL = "https://api.banidb.com/v2"
 
 # Create a shared HTTP client with connection pooling for better performance
 http_client = httpx.AsyncClient(
-    timeout=httpx.Timeout(10.0, connect=5.0),  # Reduced timeout
-    limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
+    timeout=httpx.Timeout(5.0, connect=2.0),  # Optimized timeouts
+    limits=httpx.Limits(max_keepalive_connections=50, max_connections=100),
+    headers={"User-Agent": "BaniAI/1.0"},  # Consistent User-Agent
     http2=True  # Enable HTTP/2 for better performance
 )
 
-# Debouncing mechanism to avoid too many API calls
+# Search caching mechanism
 search_cache = {}
-last_search_time = defaultdict(float)
-DEBOUNCE_DELAY = 0.5  # 500ms debounce delay
 
-# --- SGGS.txt Fuzzy Search Setup ---
-SGGS_PATH = Path(__file__).parent / "uploads" / "SGGS.txt"
+# --- SGGSO.txt Fuzzy Search Setup ---
+from functools import lru_cache
+
+SGGS_PATH = Path(__file__).parent / "uploads" / "SGGSO.txt"
 SGGS_LINES = []
 SGGS_LOADED = False
 FUZZY_THRESHOLD = float(os.getenv("FUZZY_MATCH_THRESHOLD", "40"))
 
-# Load SGGS.txt into memory on startup
-if SGGS_PATH.exists():
-    with open(SGGS_PATH, encoding="utf-8") as f:
-        SGGS_LINES = [unicodedata.normalize('NFC', line.strip()) for line in f if line.strip()]
-    SGGS_LOADED = True
-    logger.info(f"Loaded {len(SGGS_LINES)} lines from SGGS.txt for fuzzy search.")
-else:
-    logger.warning(f"SGGS.txt not found at {SGGS_PATH}. Fuzzy search will be disabled.")
+# Async loading of SGGSO.txt
+async def load_sggs_data():
+    """Asynchronously load SGGSO.txt data"""
+    global SGGS_LINES, SGGS_LOADED
+    
+    if SGGS_PATH.exists():
+        try:
+            with open(SGGS_PATH, 'r', encoding="utf-8") as f:
+                SGGS_LINES = [unicodedata.normalize('NFC', line.strip()) for line in f if line.strip()]
+            SGGS_LOADED = True
+            logger.info(f"Loaded {len(SGGS_LINES)} lines from SGGSO.txt for fuzzy search.")
+        except Exception as e:
+            logger.error(f"Error loading SGGSO.txt: {e}")
+            SGGS_LOADED = False
+    else:
+        logger.warning(f"SGGSO.txt not found at {SGGS_PATH}. Fuzzy search will be disabled.")
 
-from rapidfuzz import fuzz
+from rapidfuzz import fuzz, process
 
+@lru_cache(maxsize=1000)
 def fuzzy_search_sggs(query: str, threshold: float = FUZZY_THRESHOLD):
+    """Optimized fuzzy search with caching and early termination"""
     print(f"DEBUG: SGGS_LOADED={SGGS_LOADED}, query='{query}'")
     if not SGGS_LOADED or not query.strip():
         print("DEBUG: Not loaded or empty query")
         return []
+    
+    # First, try to find an excellent match with early termination (score >= 95)
     best_score = -1
     best_line = None
+    
     for line in SGGS_LINES:
         score = fuzz.ratio(query, line)
+        if score >= 95:  # Early termination for excellent matches
+            print(f"DEBUG: Early termination! Score={score}, Line='{line}'")
+            return [(line, score)]
         if score > best_score:
             best_score = score
             best_line = line
+    
+    # If no excellent match found, return the best match we found
     print(f"DEBUG: Best score={best_score}, Best line='{best_line}'")
     if best_score >= threshold:
         return [(best_line, best_score)]
+    elif best_score >= 55:  # Still return decent matches
+        return [(best_line, best_score)]
     else:
-        return [(best_line, best_score)] if best_line else []
+        print("DEBUG: No matches found above threshold")
+        return []
 
 # Session management for REST API
 session_store = {}
@@ -102,6 +124,7 @@ class SessionData:
         self.top_result_found = False
         self.search_history = []
 
+@lru_cache(maxsize=500)
 def strip_gurmukhi_matras(text: str) -> str:
     """
     Strip matras (vowel signs) from Gurmukhi text, keeping only the main letters.
@@ -176,6 +199,7 @@ def strip_gurmukhi_matras(text: str) -> str:
     cleaned_text = unicodedata.normalize('NFC', cleaned_text)
     return cleaned_text
 
+@lru_cache(maxsize=500)
 def get_first_letters_search(text: str) -> str:
     """
     Get first letters of each word concatenated for searchtype=1 search.
@@ -220,13 +244,7 @@ async def search_banidb_api(query: str, source: str = "all", searchtype: str = "
         logger.info(f"Cache hit for query: '{search_query}'")
         return search_cache[cache_key]
 
-    # Debouncing: skip if too soon after last search
-    current_time = time.time()
-    if current_time - last_search_time[search_query] < DEBOUNCE_DELAY:
-        logger.info(f"Debouncing search for: '{search_query}'")
-        return []
-
-    last_search_time[search_query] = current_time
+    # No debouncing needed - frontend handles request deduplication
 
     try:
         # Use the shared HTTP client for better performance
@@ -398,11 +416,14 @@ async def strip_matras_endpoint(text: str):
 
 
 
+@app.on_event("startup")
+async def startup_event():
+    """Initialize async tasks on startup"""
+    # Load SGGS data asynchronously
+    await load_sggs_data()
+    # Start cache cleanup task
+    asyncio.create_task(cleanup_cache())
+
 if __name__ == "__main__":
     import uvicorn
-    
-    # Start cache cleanup task
-    loop = asyncio.get_event_loop()
-    loop.create_task(cleanup_cache())
-    
     uvicorn.run(app, host="0.0.0.0", port=8000) 
