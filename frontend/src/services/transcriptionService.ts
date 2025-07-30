@@ -68,26 +68,7 @@ class TranscriptionService {
     }
   }
 
-  async getFullShabad(shabadId: number, verseId?: number, transcription?: string): Promise<any> {
-    try {
-      const params = new URLSearchParams({
-        shabadId: shabadId.toString(),
-        ...(verseId && { verseId: verseId.toString() }),
-        ...(transcription && { transcription })
-      });
 
-      const response = await fetch(`${this.baseUrl}/api/full-shabad?${params}`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Full shabad fetch error:', error);
-      throw error;
-    }
-  }
 
   getSessionId(): string {
     return this.sessionId;

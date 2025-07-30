@@ -396,56 +396,7 @@ async def strip_matras_endpoint(text: str):
         "length_first_letters": len(first_letters)
     }
 
-@app.get("/api/full-shabad")
-async def get_full_shabad(shabadId: int = Query(...), verseId: int = Query(None), transcription: str = Query("")):
-    """Fetch full shabad by shabadId, map BaniDB response to frontend format, and return all metadata and lines."""
-    try:
-        # Try fetching full shabad from BaniDB (use plural 'shabads')
-        shabad_url = f"{BANIDB_API_BASE_URL}/shabads/{shabadId}"
-        try:
-            response = await http_client.get(shabad_url)
-            response.raise_for_status()
-            shabad_data = response.json()
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404 and verseId:
-                # Fallback: fetch by verse
-                verse_url = f"{BANIDB_API_BASE_URL}/verse/{verseId}"
-                response = await http_client.get(verse_url)
-                response.raise_for_status()
-                shabad_data = response.json()
-            else:
-                raise
 
-        # Map shabadInfo fields to top-level fields
-        info = shabad_data.get("shabadInfo", {})
-        mapped = {
-            "shabad_id": info.get("shabadId"),
-            "shabad_name": info.get("shabadName"),
-            "page_no": info.get("pageNo"),
-            "source": info.get("source", {}).get("unicode"),
-            "raag": info.get("raag", {}).get("unicode"),
-            "writer": info.get("writer", {}).get("english"),
-            "count": shabad_data.get("count"),
-            "navigation": shabad_data.get("navigation"),
-        }
-
-        # Map verses to lines_highlighted
-        mapped["lines_highlighted"] = [
-            {
-                "gurmukhi_highlighted": v.get("verse", {}).get("unicode") or v.get("verse", {}).get("gurmukhi", ""),
-                "gurmukhi_original": v.get("verse", {}).get("unicode") or v.get("verse", {}).get("gurmukhi", ""),
-                "transliteration": v.get("transliteration", {}).get("english", ""),
-                "translation": v.get("translation", {}).get("en", {}).get("bdb", ""),
-                "page_no": v.get("pageNo"),
-                "line_no": v.get("lineNo"),
-                "verse_id": v.get("verseId"),
-            }
-            for v in shabad_data.get("verses", [])
-        ]
-        return mapped
-    except Exception as e:
-        logger.error(f"Error fetching full shabad: {e}")
-        return {"error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn

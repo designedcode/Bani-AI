@@ -5,6 +5,7 @@ import LoadingOverlay from './components/LoadingOverlay';
 import StickyButtons from './components/StickyButtons';
 import MetadataPills from './components/MetadataPills';
 import { transcriptionService } from './services/transcriptionService';
+import { banidbService } from './services/banidbService';
 
 // Custom hook for real-time audio volume detection
 function useMicVolume(autoStart: boolean) {
@@ -80,81 +81,76 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const lastSentTextRef = useRef<string>('');
   const shabadsBeingFetched = useRef<Set<number>>(new Set());
+  const shabadsLoadedRef = useRef(false); // Track if shabads are loaded
+  const transcriptionSentRef = useRef(false); // Track if we've already sent a transcription
+  const wordCountTriggeredRef = useRef(false); // Track if 8+ words have been reached
   const [subtitleText, setSubtitleText] = useState('');
   const [showMatchedSubtitle, setShowMatchedSubtitle] = useState(false);
   const MATCH_DISPLAY_DELAY = 1800; // ms
   const recognitionManuallyStoppedRef = useRef(false);
 
-  // Debounced function to send transcription data via HTTP
-  const debouncedSendTranscription = useCallback(async (text: string, confidence: number) => {
-    // Clear existing timeout
-    if (debounceTimeoutRef.current) {
-      clearTimeout(debounceTimeoutRef.current);
-    }
-
-    // Don't send if it's the same as last sent text or if already processing
-    if (text === lastSentTextRef.current || isProcessing) {
+  // Simple function to send transcription data via HTTP (no debouncing)
+  const sendTranscription = useCallback(async (text: string, confidence: number) => {
+    // Don't send if we've already sent a transcription successfully
+    if (transcriptionSentRef.current) {
+      console.log('Skipping transcription - already sent one successfully');
       return;
     }
 
-    // Set new timeout
-    debounceTimeoutRef.current = setTimeout(async () => {
-      if (shabads.length > 0 || searchTriggered) return;
+    // Don't send if already processing
+    if (isProcessing) {
+      console.log('Skipping transcription - already processing');
+      return;
+    }
 
-      try {
-        setIsProcessing(true);
-        setError('');
+    // IMPORTANT: Don't process transcription if we already have shabads loaded
+    if (shabadsLoadedRef.current || searchTriggered) {
+      console.log('Skipping transcription - shabads already loaded or search triggered');
+      return;
+    }
 
-        const response = await transcriptionService.transcribeAndSearch(text, confidence);
+    try {
+      setIsProcessing(true);
+      setError('');
+      console.log(`[TRANSCRIPTION] Sending transcription: "${text.substring(0, 50)}..."`);
 
-        // Update state with response - only keep what we actually use
-        if (response.results && response.results.length > 0) {
-          setLastSggsMatchFound(response.sggs_match_found);
-          setLastBestSggsMatch(response.best_sggs_match);
+      // Mark that we're sending a transcription to prevent duplicates
+      transcriptionSentRef.current = true;
 
-          // Fetch full shabad if not already loaded
-          const newShabadId = response.results[0].shabad_id;
-          if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
-            shabadsBeingFetched.current.add(newShabadId);
-            try {
-              const shabadData = await transcriptionService.getFullShabad(newShabadId);
-              setShabads(prev => [...prev, shabadData]);
-            } catch (err) {
-              console.error('Error fetching full shabad:', err);
-            } finally {
-              shabadsBeingFetched.current.delete(newShabadId);
-            }
+      const response = await transcriptionService.transcribeAndSearch(text, confidence);
+
+      // Update state with response - only keep what we actually use
+      if (response.results && response.results.length > 0) {
+        setLastSggsMatchFound(response.sggs_match_found);
+        setLastBestSggsMatch(response.best_sggs_match);
+
+        // Fetch full shabad if not already loaded
+        const newShabadId = response.results[0].shabad_id;
+        if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
+          shabadsBeingFetched.current.add(newShabadId);
+          try {
+            const shabadData = await banidbService.getFullShabad(newShabadId, response.results[0].verse_id);
+            setShabads(prev => [...prev, shabadData]);
+          } catch (err) {
+            console.error('Error fetching full shabad:', err);
+          } finally {
+            shabadsBeingFetched.current.delete(newShabadId);
           }
         }
-
-        lastSentTextRef.current = text;
-      } catch (err) {
-        console.error('Transcription error:', err);
-        setError('Failed to process transcription');
-      } finally {
-        setIsProcessing(false);
       }
-    }, 300); // 300ms debounce delay
+    } catch (err) {
+      console.error('Transcription error:', err);
+      setError('Failed to process transcription');
+      // Reset the flag on error so user can try again
+      transcriptionSentRef.current = false;
+      wordCountTriggeredRef.current = false;
+    } finally {
+      setIsProcessing(false);
+    }
   }, [shabads, searchTriggered, isProcessing]);
 
-  // Fix: Clear debounce timer when fullShabad is set
-  useEffect(() => {
-    if (shabads.length > 0 && debounceTimeoutRef.current) {
-      clearTimeout(debounceTimeoutRef.current);
-    }
-  }, [shabads]);
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (debounceTimeoutRef.current) {
-        clearTimeout(debounceTimeoutRef.current);
-      }
-    };
-  }, [debouncedSendTranscription]);
 
   // Initialize speech recognition
   useEffect(() => {
@@ -189,13 +185,17 @@ function App() {
         }
         setTranscribedText(prev => {
           const updated = prev + newTranscript;
-          const fullTranscript = (updated + interim).trim();
-          const wordCount = fullTranscript.split(/\s+/).length;
 
-          // Backend: Only send when word count >= 8, and send the full transcription
-          if (wordCount >= 8) {
-            debouncedSendTranscription(fullTranscript, maxConfidence);
+          // Check word count on FINAL transcribed text only (not including interim)
+          const finalWordCount = updated.trim().split(/\s+/).filter(word => word.length > 0).length;
+
+          // Send transcription as soon as we have 8+ final words, but only once
+          if (finalWordCount >= 8 && !wordCountTriggeredRef.current && !shabadsLoadedRef.current && !transcriptionSentRef.current) {
+            console.log(`[SPEECH] Triggering transcription with ${finalWordCount} final words: "${updated.substring(0, 50)}..."`);
+            wordCountTriggeredRef.current = true; // Mark that we've triggered the 8+ word condition
+            sendTranscription(updated.trim(), maxConfidence);
           }
+
           return updated;
         });
         setInterimTranscript(interim);
@@ -248,12 +248,13 @@ function App() {
         recognitionRef.current.abort();
       }
     };
-  }, [debouncedSendTranscription]);
+  }, [sendTranscription]);
 
   // Hide loader as soon as a shabad is found
   useEffect(() => {
     if (shabads.length > 0) {
       setShowLoader(false);
+      shabadsLoadedRef.current = true; // Update ref when shabads are loaded
     }
   }, [shabads]);
 
@@ -282,6 +283,20 @@ function App() {
   // Start mic volume detection as soon as the app loads
   const micVolume = useMicVolume(true);
 
+  // Function to reset transcription state (for future use)
+  const resetTranscriptionState = useCallback(() => {
+    setShabads([]);
+    setTranscribedText('');
+    setInterimTranscript('');
+    setLastSggsMatchFound(null);
+    setLastBestSggsMatch(null);
+    setShowLoader(true);
+    setError('');
+    shabadsLoadedRef.current = false;
+    transcriptionSentRef.current = false; // Reset transcription sent flag
+    wordCountTriggeredRef.current = false; // Reset word count trigger flag
+  }, []);
+
   // Automatically start speech recognition on mount
   useEffect(() => {
     if (recognitionRef.current) {
@@ -293,26 +308,39 @@ function App() {
     }
   }, []);
 
-  // Control functions removed - auto-restart handles everything
+  // Expose reset function for development/testing
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      (window as any).resetBaniAI = resetTranscriptionState;
+    }
+  }, [resetTranscriptionState]);
 
   // Callback to fetch next shabad
   const handleNeedNextShabad = async () => {
     const lastShabad = shabads[shabads.length - 1];
     const nextShabadId = lastShabad?.navigation?.next;
+    console.log(`[PAGINATION] Attempting to fetch next shabad. Current: ${lastShabad?.shabad_id}, Next: ${nextShabadId}`);
+
     if (
       nextShabadId &&
       !shabads.some(s => s.shabad_id === nextShabadId) &&
       !shabadsBeingFetched.current.has(nextShabadId)
     ) {
+      console.log(`[PAGINATION] Fetching shabad ${nextShabadId}`);
       shabadsBeingFetched.current.add(nextShabadId);
       try {
-        const data = await transcriptionService.getFullShabad(nextShabadId);
-        setShabads(prev => [...prev, data]);
+        const data = await banidbService.getFullShabad(nextShabadId);
+        setShabads(prev => {
+          console.log(`[PAGINATION] Successfully fetched shabad ${nextShabadId}, total shabads: ${prev.length + 1}`);
+          return [...prev, data];
+        });
       } catch (err) {
         console.error('Error fetching next shabad:', err);
       } finally {
         shabadsBeingFetched.current.delete(nextShabadId);
       }
+    } else {
+      console.log(`[PAGINATION] Skipping fetch - nextShabadId: ${nextShabadId}, already exists: ${shabads.some(s => s.shabad_id === nextShabadId)}, being fetched: ${shabadsBeingFetched.current.has(nextShabadId)}`);
     }
   };
 

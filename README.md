@@ -87,12 +87,18 @@ chmod +x start.sh
 
 ## API Endpoints
 
+### Backend API
 - `GET /api/health` - Health check
 - `POST /api/upload-audio` - Upload audio file
 - `GET /api/search` - Search BaniDB
 - `GET /api/sources` - Get available sources
 - `GET /api/strip-matras` - Test matra stripping
 - `POST /api/transcribe` - Process transcription and return search results
+
+### Direct BaniDB Integration
+The frontend now directly calls BaniDB API for full shabad data:
+- `GET https://api.banidb.com/v2/shabads/{shabadId}` - Get full shabad
+- `GET https://api.banidb.com/v2/verse/{verseId}` - Get shabad by verse (fallback)
 
 ## Project Structure
 
@@ -115,7 +121,19 @@ Bani-AI-New-Approach/
 
 ## Configuration
 
-The application uses the BaniDB API for Gurbani search. No additional configuration is required for basic functionality.
+### Environment Variables
+
+Create a `.env` file in the frontend directory:
+
+```bash
+# BaniDB API Configuration
+REACT_APP_BANIDB_API_URL=https://api.banidb.com/v2
+
+# Backend API Configuration  
+REACT_APP_API_URL=http://localhost:8000
+```
+
+The application uses the BaniDB API for Gurbani search. The frontend now directly calls BaniDB API for better performance and reduced backend load.
 
 ## Contributing
 
