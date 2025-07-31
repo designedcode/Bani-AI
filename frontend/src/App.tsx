@@ -194,14 +194,15 @@ function App() {
         setTranscribedText(prev => {
           const updated = prev + newTranscript;
 
-          // Check word count on FINAL transcribed text only (not including interim)
-          const finalWordCount = updated.trim().split(/\s+/).filter(word => word.length > 0).length;
+          // Check word count on COMBINED final + interim text
+          const combinedText = (updated + interim).trim();
+          const totalWordCount = combinedText.split(/\s+/).filter(word => word.length > 0).length;
 
-          // Send transcription as soon as we have 8+ final words, but only once
-          if (finalWordCount >= 8 && !wordCountTriggeredRef.current && !shabadsLoadedRef.current && !transcriptionSentRef.current) {
-            console.log(`[SPEECH] Triggering transcription with ${finalWordCount} final words: "${updated.substring(0, 50)}..."`);
-            wordCountTriggeredRef.current = true; // Mark that we've triggered the 8+ word condition
-            sendTranscription(updated.trim(), maxConfidence);
+          // Send transcription as soon as we have 5+ words (final or interim), but only once
+          if (totalWordCount >= 5 && !wordCountTriggeredRef.current && !shabadsLoadedRef.current && !transcriptionSentRef.current) {
+            console.log(`[SPEECH] Triggering transcription with ${totalWordCount} total words: "${combinedText.substring(0, 50)}..."`);
+            wordCountTriggeredRef.current = true; // Mark that we've triggered the 5+ word condition
+            sendTranscription(combinedText, maxConfidence);
           }
 
           return updated;
