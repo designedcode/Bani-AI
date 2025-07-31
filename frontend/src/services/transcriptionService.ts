@@ -38,7 +38,7 @@ class TranscriptionService {
   private sessionId: string;
 
   constructor() {
-    this.baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+    this.baseUrl = process.env.REACT_APP_API_URL || 'https://bani-ai.onrender.com';
     this.sessionId = this.generateSessionId();
   }
 
