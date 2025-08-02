@@ -6,114 +6,64 @@ import StickyButtons from './components/StickyButtons';
 import MetadataPills from './components/MetadataPills';
 import { transcriptionService } from './services/transcriptionService';
 import { banidbService } from './services/banidbService';
+import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 
-// Custom hook for real-time audio volume detection
-function useMicVolume(autoStart: boolean) {
-  const [volume, setVolume] = useState(0);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const dataArrayRef = useRef<Uint8Array | null>(null);
-  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const rafRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    let stream: MediaStream | null = null;
-    if (!autoStart) return;
-    let cancelled = false;
-
-    async function setup() {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        if (cancelled) return;
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-        audioContextRef.current = audioContext;
-        const analyser = audioContext.createAnalyser();
-        analyser.fftSize = 256;
-        analyserRef.current = analyser;
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        dataArrayRef.current = dataArray;
-        const source = audioContext.createMediaStreamSource(stream);
-        sourceRef.current = source;
-        source.connect(analyser);
-
-        const updateVolume = () => {
-          if (!analyserRef.current || !dataArrayRef.current) return;
-          analyserRef.current.getByteTimeDomainData(dataArrayRef.current);
-          // Calculate RMS (root mean square) volume
-          let sum = 0;
-          for (let i = 0; i < dataArrayRef.current.length; i++) {
-            const val = (dataArrayRef.current[i] - 128) / 128;
-            sum += val * val;
-          }
-          const rms = Math.sqrt(sum / dataArrayRef.current.length);
-          setVolume(rms);
-          rafRef.current = requestAnimationFrame(updateVolume);
-        };
-        updateVolume();
-      } catch (err) {
-        setVolume(0);
-      }
-    }
-    setup();
-    return () => {
-      cancelled = true;
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      if (audioContextRef.current) audioContextRef.current.close();
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, [autoStart]);
-  return volume;
-}
 
 function App() {
-  const [, setIsListening] = useState(false);
-  const [transcribedText, setTranscribedText] = useState('');
-  const [error, setError] = useState<string>('');
   const [shabads, setShabads] = useState<any[]>([]);
   const [searchTriggered] = useState(false);
-  const [interimTranscript, setInterimTranscript] = useState('');
   const [lastSggsMatchFound, setLastSggsMatchFound] = useState<boolean | null>(null);
   const [lastBestSggsMatch, setLastBestSggsMatch] = useState<string | null>(null);
   const [showLoader, setShowLoader] = useState(true);
   const [userMessage, setUserMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
   const shabadsBeingFetched = useRef<Set<number>>(new Set());
   const shabadsLoadedRef = useRef(false); // Track if shabads are loaded
   const transcriptionSentRef = useRef(false); // Track if we've already sent a transcription
-  const wordCountTriggeredRef = useRef(false); // Track if 8+ words have been reached
+  const wordCountTriggeredRef = useRef(false); // Track if 5+ words have been reached
   const [subtitleText, setSubtitleText] = useState('');
   const [showMatchedSubtitle, setShowMatchedSubtitle] = useState(false);
   const MATCH_DISPLAY_DELAY = 1800; // ms
-  const recognitionManuallyStoppedRef = useRef(false);
+
+  // Use the new speech recognition hook
+  const {
+    isListening,
+    transcribedText,
+    interimTranscript,
+    error,
+    noSpeechCount,
+    volume,
+    start: startSpeechRecognition,
+    returnToLoadingOverlay,
+    resetTranscription
+  } = useSpeechRecognition();
 
   // Simple function to send transcription data via HTTP (no debouncing)
   const sendTranscription = useCallback(async (text: string, confidence: number) => {
+    // Don't send if max no-speech errors reached
+    if (noSpeechCount >= 3) {
+      return;
+    }
+
     // Don't send if we've already sent a transcription successfully
     if (transcriptionSentRef.current) {
-      console.log('Skipping transcription - already sent one successfully');
       return;
     }
 
     // Don't send if already processing
     if (isProcessing) {
-      console.log('Skipping transcription - already processing');
       return;
     }
 
     // IMPORTANT: Don't process transcription if we already have shabads loaded
     if (shabadsLoadedRef.current || searchTriggered) {
-      console.log('Skipping transcription - shabads already loaded or search triggered');
       return;
     }
 
     try {
       setIsProcessing(true);
-      setError('');
-      console.log(`[TRANSCRIPTION] Sending transcription: "${text.substring(0, 50)}..."`);
 
       // Mark that we're sending a transcription to prevent duplicates
       transcriptionSentRef.current = true;
@@ -146,9 +96,8 @@ function App() {
       if (err instanceof Error && err.message.includes('No results found - page will refresh')) {
         // Don't show error message, just let the page refresh happen
         setUserMessage('No results found. Refreshing...');
-        console.log('Page refresh triggered due to no results');
       } else {
-        setError('Failed to process transcription');
+        setUserMessage('Failed to process transcription');
         // Reset the flag on error so user can try again
         transcriptionSentRef.current = false;
         wordCountTriggeredRef.current = false;
@@ -156,108 +105,65 @@ function App() {
     } finally {
       setIsProcessing(false);
     }
-  }, [shabads, searchTriggered, isProcessing]);
+  }, [shabads, searchTriggered, isProcessing, noSpeechCount]);
 
 
 
-  // Initialize speech recognition
+  // Handle speech recognition results and trigger transcription
   useEffect(() => {
-    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      if (recognitionRef.current) {
-        recognitionRef.current.abort();
-      }
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = 'pa-IN';
-      recognition.onstart = () => {
-        console.log('Speech recognition started');
-        setIsListening(true);
-        setUserMessage('');
-        recognitionManuallyStoppedRef.current = false;
-      };
-      recognition.onresult = (event) => {
-        let newTranscript = '';
-        let interim = '';
-        let maxConfidence = 0;
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const transcript = event.results[i][0].transcript;
-          const confidence = event.results[i][0].confidence;
-          if (event.results[i].isFinal) {
-            newTranscript += transcript;
-            maxConfidence = Math.max(maxConfidence, confidence);
-          } else {
-            interim += transcript;
-          }
-        }
-        setTranscribedText(prev => {
-          const updated = prev + newTranscript;
-
-          // Check word count on COMBINED final + interim text
-          const combinedText = (updated + interim).trim();
-          const totalWordCount = combinedText.split(/\s+/).filter(word => word.length > 0).length;
-
-          // Send transcription as soon as we have 5+ words (final or interim), but only once
-          if (totalWordCount >= 5 && !wordCountTriggeredRef.current && !shabadsLoadedRef.current && !transcriptionSentRef.current) {
-            console.log(`[SPEECH] Triggering transcription with ${totalWordCount} total words: "${combinedText.substring(0, 50)}..."`);
-            wordCountTriggeredRef.current = true; // Mark that we've triggered the 5+ word condition
-            sendTranscription(combinedText, maxConfidence);
-          }
-
-          return updated;
-        });
-        setInterimTranscript(interim);
-      };
-      recognition.onerror = (event) => {
-        console.log('Speech recognition error:');
-        if (event.error === 'no-speech') {
-          setUserMessage('No speech detected. Please try speaking again.');
-          // Always auto-restart unless manually stopped
-          if (!recognitionManuallyStoppedRef.current) {
-            setTimeout(() => {
-              try {
-                recognition.start();
-              } catch (e) { }
-            }, 800);
-          }
-        } else if (event.error === 'aborted') {
-          recognitionManuallyStoppedRef.current = true;
-        } else {
-          setError(`Speech recognition error: ${event.error}`);
-          // For other errors, auto-restart unless manually stopped
-          if (!recognitionManuallyStoppedRef.current) {
-            setTimeout(() => {
-              try {
-                recognition.start();
-              } catch (e) { }
-            }, 1200);
-          }
-        }
-        setIsListening(false);
-      };
-      recognition.onend = () => {
-        console.log('Speech recognition ended');
-        setIsListening(false);
-        // Always auto-restart unless manually stopped
-        if (!recognitionManuallyStoppedRef.current) {
-          setTimeout(() => {
-            try {
-              recognition.start();
-            } catch (e) { }
-          }, 800);
-        }
-      };
-      recognitionRef.current = recognition;
-    } else {
-      setError('Speech recognition not supported in this browser');
+    // Don't process transcription if max no-speech errors reached
+    if (noSpeechCount >= 3) {
+      return;
     }
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.abort();
-      }
-    };
-  }, [sendTranscription]);
+
+    // Check word count on COMBINED final + interim text
+    const combinedText = (transcribedText + ' ' + interimTranscript).trim();
+    const totalWordCount = combinedText.split(/\s+/).filter(word => word.length > 0).length;
+
+    // Send transcription as soon as we have 5+ words (final or interim), but only once
+    if (totalWordCount >= 5 && !wordCountTriggeredRef.current && !shabadsLoadedRef.current && !transcriptionSentRef.current) {
+      wordCountTriggeredRef.current = true; // Mark that we've triggered the 5+ word condition
+      sendTranscription(combinedText, 0.8); // Default confidence since we don't get it from the hook
+    }
+  }, [transcribedText, interimTranscript, sendTranscription, noSpeechCount]);
+
+  // Handle speech recognition errors
+  useEffect(() => {
+    if (error) {
+      setUserMessage(`Speech error: ${error}`);
+    } else if (!isProcessing) {
+      // Only clear message if not processing to avoid clearing processing messages
+      setUserMessage('');
+    }
+  }, [error, isProcessing]);
+
+  // Handle returning to loading overlay when max no-speech errors reached
+  useEffect(() => {
+    if (noSpeechCount >= 3 && shabads.length > 0) {
+      setShowLoader(true);
+      
+      // Clear shabads to force fresh search
+      setShabads([]);
+      
+      // Aggressively reset ALL transcription-related state
+      resetTranscription(); // Clear all transcribed text
+      transcriptionSentRef.current = false;
+      wordCountTriggeredRef.current = false;
+      shabadsLoadedRef.current = false;
+      
+      // Clear all subtitle and match state immediately
+      setSubtitleText('');
+      setShowMatchedSubtitle(false);
+      setLastSggsMatchFound(null);
+      setLastBestSggsMatch(null);
+      
+      // Force another clear after a brief delay to ensure state updates
+      setTimeout(() => {
+        setSubtitleText('');
+        resetTranscription();
+      }, 10);
+    }
+  }, [noSpeechCount, shabads.length, resetTranscription]);
 
   // Hide loader as soon as a shabad is found
   useEffect(() => {
@@ -269,12 +175,17 @@ function App() {
 
   // Show live transcription as subtitle during loading
   useEffect(() => {
-    if (showLoader && !showMatchedSubtitle) {
+    // Immediately clear subtitle if max no-speech errors reached
+    if (noSpeechCount >= 3) {
+      setSubtitleText('');
+      return;
+    }
+    
+    if (showLoader && !showMatchedSubtitle && !shabadsLoadedRef.current && noSpeechCount < 3) {
       const subtitle = (transcribedText + ' ' + interimTranscript).trim();
       setSubtitleText(subtitle);
-      console.log('[DEBUG] Subtitle update:', { transcribedText, interimTranscript, subtitle });
     }
-  }, [transcribedText, interimTranscript, showLoader, showMatchedSubtitle]);
+  }, [transcribedText, interimTranscript, showLoader, showMatchedSubtitle, noSpeechCount]);
 
   // When SGGS match is found, show matched text as subtitle, then transition
   useEffect(() => {
@@ -289,40 +200,35 @@ function App() {
     }
   }, [showLoader, lastSggsMatchFound, lastBestSggsMatch]);
 
-  // Start mic volume detection as soon as the app loads
-  const micVolume = useMicVolume(true);
+
 
   // Function to reset transcription state (for future use)
   const resetTranscriptionState = useCallback(() => {
     setShabads([]);
-    setTranscribedText('');
-    setInterimTranscript('');
+    resetTranscription(); // Use the hook's reset function
     setLastSggsMatchFound(null);
     setLastBestSggsMatch(null);
     setShowLoader(true);
-    setError('');
     shabadsLoadedRef.current = false;
     transcriptionSentRef.current = false; // Reset transcription sent flag
     wordCountTriggeredRef.current = false; // Reset word count trigger flag
-  }, []);
+  }, [resetTranscription]);
 
   // Automatically start speech recognition on mount
   useEffect(() => {
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.start();
-      } catch (error) {
-        // Already started or error
-      }
-    }
-  }, []);
+    startSpeechRecognition();
+  }, [startSpeechRecognition]);
 
   // Expose reset function for development/testing
   useEffect(() => {
     if (process.env.NODE_ENV === 'development') {
       (window as any).resetBaniAI = resetTranscriptionState;
+      (window as any).returnToLoading = () => {
+        setShowLoader(true);
+        returnToLoadingOverlay();
+      };
     }
-  }, [resetTranscriptionState]);
+  }, [resetTranscriptionState, returnToLoadingOverlay]);
 
   // Callback to fetch next shabad
   const handleNeedNextShabad = async () => {
@@ -355,7 +261,11 @@ function App() {
 
   return (
     <>
-      <LoadingOverlay className={showLoader ? '' : 'fade-out'} volume={micVolume} subtitle={showLoader ? subtitleText : undefined} />
+      <LoadingOverlay 
+        className={showLoader ? '' : 'fade-out'} 
+        volume={volume} 
+        subtitle={showLoader ? subtitleText : undefined}
+      />
       <div style={{ display: showLoader ? 'none' : 'block' }}>
         <div className="App">
           <header className="App-header">
@@ -371,7 +281,7 @@ function App() {
                 {isProcessing ? '🟡' : error ? '🔴' : '🟢'}
               </span>
               <span className="status-text">
-                {isProcessing ? 'Processing...' : error ? `Error: ${error}` : 'Ready for transcription'}
+                {isProcessing ? 'Processing...' : error ? `Error: ${error}` : isListening ? 'Listening...' : 'Ready for transcription'}
               </span>
             </div>
           </header>
