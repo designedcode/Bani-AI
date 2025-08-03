@@ -26,13 +26,21 @@ interface LoadingOverlayProps {
   volume?: number;
   children?: React.ReactNode;
   subtitle?: React.ReactNode;
+  isMobile?: boolean;
+  speechError?: string;
+  onStartSpeech?: () => void;
+  isListening?: boolean;
 }
 
 const LoadingOverlay: React.FC<LoadingOverlayProps> = ({ 
   className = '', 
   volume = 0, 
   children, 
-  subtitle
+  subtitle,
+  isMobile = false,
+  speechError,
+  onStartSpeech,
+  isListening = false
 }) => {
   // Sensitive and less smooth (range: 1.0 to 2.0)
   const adjustedVolume = Math.pow(Math.min(volume, 1), 0.5);
@@ -95,6 +103,37 @@ const LoadingOverlay: React.FC<LoadingOverlayProps> = ({
       {subtitle && (
         <div className="loading-overlay-subtitle">
           {subtitle}
+        </div>
+      )}
+      
+      {/* Mobile Speech Recognition Controls */}
+      {isMobile && (
+        <div className="mobile-speech-controls">
+          {speechError ? (
+            <div className="mobile-speech-error">
+              <div className="error-message">🎤 {speechError}</div>
+              <button 
+                className="mobile-start-btn"
+                onClick={onStartSpeech}
+              >
+                🔄 Try Again
+              </button>
+            </div>
+          ) : !isListening ? (
+            <div className="mobile-speech-prompt">
+              <div className="prompt-message">🎤 Tap to start speech recognition</div>
+              <button 
+                className="mobile-start-btn"
+                onClick={onStartSpeech}
+              >
+                🎤 Start Listening
+              </button>
+            </div>
+          ) : (
+            <div className="mobile-speech-active">
+              <div className="active-message">🎤 Listening...</div>
+            </div>
+          )}
         </div>
       )}
     </div>

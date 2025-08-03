@@ -90,6 +90,15 @@ The main app now includes:
 - Mobile-specific error handling
 - Helpful troubleshooting UI
 - Better user feedback
+- **LoadingOverlay with mobile speech controls**
+- **Debug panel for mobile troubleshooting**
+
+### 4. Mobile Chrome Testing
+1. **Load the app** - You'll see the LoadingOverlay with mobile speech controls
+2. **Tap "Start Listening"** - This triggers user interaction required for mobile Chrome
+3. **Check debug info** - Tap the "🔧 Debug" button in the header for detailed mobile info
+4. **Test speech recognition** - Speak clearly and check if transcription works
+5. **Troubleshoot issues** - Use the debug panel to identify specific problems
 
 ## Common Mobile Issues and Solutions
 
@@ -138,6 +147,8 @@ No additional environment variables required for mobile support.
 ### New Files
 - `frontend/src/components/MobileSpeechHelper.tsx` - Mobile troubleshooting UI
 - `frontend/src/components/MobileSpeechHelper.css` - Mobile helper styles
+- `frontend/src/components/MobileDebugPanel.tsx` - Mobile debug panel
+- `frontend/src/components/MobileDebugPanel.css` - Debug panel styles
 - `frontend/public/speech-test.html` - Debug page
 - `frontend/public/test-mobile.html` - Simple test page
 

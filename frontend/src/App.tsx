@@ -5,6 +5,7 @@ import LoadingOverlay from './components/LoadingOverlay';
 import StickyButtons from './components/StickyButtons';
 import MetadataPills from './components/MetadataPills';
 import TranscriptionPanel from './components/TranscriptionPanel';
+import { MobileDebugPanel } from './components/MobileDebugPanel';
 import { transcriptionService } from './services/transcriptionService';
 import { banidbService } from './services/banidbService';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
@@ -26,6 +27,7 @@ function App() {
   const wordCountTriggeredRef = useRef(false); // Track if 5+ words have been reached
   const [subtitleText, setSubtitleText] = useState('');
   const [showMatchedSubtitle, setShowMatchedSubtitle] = useState(false);
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
   const MATCH_DISPLAY_DELAY = 1800; // ms
 
   // Use the new speech recognition hook
@@ -216,10 +218,16 @@ function App() {
     wordCountTriggeredRef.current = false; // Reset word count trigger flag
   }, [resetTranscription]);
 
-  // Automatically start speech recognition on mount
+  // Mobile detection
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  const isMobileChrome = isMobile && /Chrome/.test(navigator.userAgent);
+
+  // Automatically start speech recognition on mount (desktop only)
   useEffect(() => {
-    startSpeechRecognition();
-  }, [startSpeechRecognition]);
+    if (!isMobileChrome) {
+      startSpeechRecognition();
+    }
+  }, [startSpeechRecognition, isMobileChrome]);
 
   // Expose reset function for development/testing
   useEffect(() => {
@@ -267,7 +275,18 @@ function App() {
         className={showLoader ? '' : 'fade-out'} 
         volume={volume} 
         subtitle={showLoader ? subtitleText : undefined}
+        isMobile={isMobileChrome}
+        speechError={isMobileChrome ? error : undefined}
+        onStartSpeech={isMobileChrome ? startSpeechRecognition : undefined}
+        isListening={isMobileChrome ? isListening : false}
       />
+      
+      {/* Mobile Debug Panel */}
+      <MobileDebugPanel 
+        isVisible={showDebugPanel} 
+        onClose={() => setShowDebugPanel(false)} 
+      />
+      
       <div style={{ display: showLoader ? 'none' : 'block' }}>
         <div className="App">
           <header className="App-header">
@@ -285,6 +304,24 @@ function App() {
               <span className="status-text">
                 {isProcessing ? 'Processing...' : error ? `Error: ${error}` : isListening ? 'Listening...' : 'Ready for transcription'}
               </span>
+              {isMobileChrome && (
+                <button 
+                  onClick={() => setShowDebugPanel(true)}
+                  className="debug-btn"
+                  style={{
+                    background: '#6c757d',
+                    color: 'white',
+                    border: 'none',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    marginLeft: '10px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  🔧 Debug
+                </button>
+              )}
             </div>
           </header>
 

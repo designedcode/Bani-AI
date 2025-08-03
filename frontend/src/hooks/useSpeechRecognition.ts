@@ -29,7 +29,14 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
 
   // Initialize speech recognition manager
   useEffect(() => {
-    const initialized = speechRecognitionManager.initialize();
+    const isMobileChrome = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) && 
+                           /Chrome/.test(navigator.userAgent) && !/Edge/.test(navigator.userAgent);
+    
+    // Use mobile-specific initialization for mobile Chrome
+    const initialized = isMobileChrome ? 
+      speechRecognitionManager.initializeForMobile() : 
+      speechRecognitionManager.initialize();
+      
     if (!initialized) {
       setError('Speech recognition not supported in this browser');
       return;
@@ -98,6 +105,15 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
   }, []);
 
   const start = useCallback(() => {
+    const isMobileChrome = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) && 
+                           /Chrome/.test(navigator.userAgent) && !/Edge/.test(navigator.userAgent);
+    
+    if (isMobileChrome) {
+      console.log('[useSpeechRecognition] Mobile Chrome detected, using mobile startup');
+      // For mobile Chrome, we need to reinitialize on user interaction
+      speechRecognitionManager.initializeForMobile();
+    }
+    
     speechRecognitionManager.start();
   }, []);
 

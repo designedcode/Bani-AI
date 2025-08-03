@@ -34,6 +34,43 @@ class SpeechRecognitionManager {
     return window.location.protocol === 'https:';
   }
 
+  // Mobile-specific initialization that waits for user interaction
+  initializeForMobile(): boolean {
+    if (!this.isMobileChrome()) {
+      return this.initialize();
+    }
+
+    console.log('[SpeechManager] Mobile Chrome detected, using mobile initialization');
+    
+    // For mobile Chrome, we need to wait for user interaction
+    if (!this.checkHTTPS()) {
+      this.emitError('Web Speech API requires HTTPS on mobile devices');
+      return false;
+    }
+
+    // Clean up existing recognition
+    if (this.recognition) {
+      try {
+        this.recognition.abort();
+      } catch (e) {
+        // Ignore errors when aborting
+      }
+      this.recognition = null;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    this.recognition = new SpeechRecognition();
+
+    // Mobile Chrome specific configuration
+    console.log('[SpeechManager] Mobile Chrome detected, applying mobile-specific config');
+    this.config.continuous = false; // Mobile Chrome often works better with continuous=false
+    this.config.restartDelay = 1200; // Longer delay for mobile
+
+    this.setupRecognitionHandlers();
+    console.log('[SpeechManager] Mobile initialization completed');
+    return true;
+  }
+
   constructor() {
     this.initializeAudioDetection();
   }
