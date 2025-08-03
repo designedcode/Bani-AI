@@ -4,6 +4,7 @@ import FullShabadDisplay from './components/FullShabadDisplay';
 import LoadingOverlay from './components/LoadingOverlay';
 import StickyButtons from './components/StickyButtons';
 import MetadataPills from './components/MetadataPills';
+import TranscriptionPanel from './components/TranscriptionPanel';
 import { transcriptionService } from './services/transcriptionService';
 import { banidbService } from './services/banidbService';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
@@ -36,6 +37,7 @@ function App() {
     noSpeechCount,
     volume,
     start: startSpeechRecognition,
+    stop: stopSpeechRecognition,
     returnToLoadingOverlay,
     resetTranscription
   } = useSpeechRecognition();
@@ -317,11 +319,16 @@ function App() {
               </div>
             )}
 
-            {error && (
-              <div className="error-message">
-                ⚠️ {error}
-              </div>
-            )}
+            {/* Transcription Panel with Mobile Support */}
+            <TranscriptionPanel
+              transcribedText={transcribedText}
+              isListening={isListening}
+              error={error}
+              onRetry={() => {
+                resetTranscription();
+                startSpeechRecognition();
+              }}
+            />
           </main>
         </div>
       </div>

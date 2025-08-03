@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speech Recognition Test - Mobile Chrome Debug</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .debug-info {
+            background: #f0f0f0;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        .status.warning { background: #fff3cd; color: #856404; }
+        .status.info { background: #d1ecf1; color: #0c5460; }
+        
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #6c757d; cursor: not-allowed; }
+        
+        select {
+            padding: 8px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+            margin: 10px 0;
+        }
+        
+        #results {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            min-height: 100px;
+            border: 1px solid #dee2e6;
+            margin: 15px 0;
+            white-space: pre-wrap;
+        }
+        
+        .controls {
+            margin: 20px 0;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Speech Recognition Test</h1>
+        <p>This page tests Web Speech API functionality on mobile Chrome and provides debugging information.</p>
+        
+        <div class="debug-info" id="browser-info">
+            <strong>Browser Information:</strong><br>
+            <span id="browser-details">Loading...</span>
+        </div>
+        
+        <div class="debug-info" id="speech-api-info">
+            <strong>Speech API Support:</strong><br>
+            <span id="speech-api-details">Loading...</span>
+        </div>
+        
+        <div class="debug-info" id="permission-info">
+            <strong>Permission Status:</strong><br>
+            <span id="permission-details">Loading...</span>
+        </div>
+        
+        <div class="status info" id="status-message">
+            Ready to test speech recognition
+        </div>
+        
+        <div class="controls">
+            <label for="language-selector">Language:</label><br>
+            <select id="language-selector">
+                <option value="en-US">English (US)</option>
+                <option value="pa-IN">Punjabi (India)</option>
+                <option value="hi-IN">Hindi (India)</option>
+                <option value="en-GB">English (UK)</option>
+            </select>
+            
+            <br><br>
+            <button id="transcribe-now" onclick="toggleSpeechRecognition()">
+                <i class="fa fa-circle"></i>Start
+            </button>
+            
+            <button onclick="checkPermissions()">Check Permissions</button>
+            <button onclick="clearResults()">Clear Results</button>
+        </div>
+        
+        <div>
+            <strong>Transcription Results:</strong>
+            <div id="results">Click "Start" to begin transcription...</div>
+        </div>
+        
+        <div class="debug-info" id="error-log">
+            <strong>Error Log:</strong><br>
+            <span id="error-details">No errors yet</span>
+        </div>
+    </div>
+
+    <script>
+        let transcriptionInProgress = null;
+        let errorLog = [];
+
+        function logError(message) {
+            errorLog.push(new Date().toISOString() + ': ' + message);
+            document.getElementById('error-details').textContent = errorLog.slice(-5).join('\n');
+        }
+
+        function updateStatus(message, type = 'info') {
+            const statusEl = document.getElementById('status-message');
+            statusEl.textContent = message;
+            statusEl.className = 'status ' + type;
+        }
+
+        function checkBrowserInfo() {
+            const userAgent = navigator.userAgent;
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+            const isChrome = /Chrome/.test(userAgent) && !/Edge/.test(userAgent);
+            const isHTTPS = location.protocol === 'https:';
+            
+            const browserDetails = `
+                User Agent: ${userAgent}
+                Mobile: ${isMobile ? 'Yes' : 'No'}
+                Chrome: ${isChrome ? 'Yes' : 'No'}
+                HTTPS: ${isHTTPS ? 'Yes' : 'No'}
+                Protocol: ${location.protocol}
+                Host: ${location.host}
+            `;
+            
+            document.getElementById('browser-details').textContent = browserDetails;
+            
+            if (!isHTTPS) {
+                updateStatus('WARNING: Web Speech API requires HTTPS on mobile devices', 'warning');
+            }
+        }
+
+        function checkSpeechAPISupport() {
+            const hasWebkitSpeechRecognition = 'webkitSpeechRecognition' in window;
+            const hasSpeechRecognition = 'SpeechRecognition' in window;
+            const isSupported = hasWebkitSpeechRecognition || hasSpeechRecognition;
+            
+            const speechAPIDetails = `
+                webkitSpeechRecognition: ${hasWebkitSpeechRecognition ? 'Available' : 'Not available'}
+                SpeechRecognition: ${hasSpeechRecognition ? 'Available' : 'Not available'}
+                Supported: ${isSupported ? 'Yes' : 'No'}
+            `;
+            
+            document.getElementById('speech-api-details').textContent = speechAPIDetails;
+            
+            if (!isSupported) {
+                updateStatus('ERROR: Speech recognition not supported in this browser', 'error');
+            } else {
+                updateStatus('Speech API is supported', 'success');
+            }
+        }
+
+        async function checkPermissions() {
+            try {
+                // Check microphone permission
+                const permission = await navigator.permissions.query({ name: 'microphone' });
+                const permissionStatus = permission.state;
+                
+                const permissionDetails = `
+                    Microphone Permission: ${permissionStatus}
+                    Permission State: ${permission.state}
+                    Can Query Permissions: ${navigator.permissions ? 'Yes' : 'No'}
+                `;
+                
+                document.getElementById('permission-details').textContent = permissionDetails;
+                
+                if (permissionStatus === 'denied') {
+                    updateStatus('Microphone permission denied. Please enable in browser settings.', 'error');
+                } else if (permissionStatus === 'prompt') {
+                    updateStatus('Microphone permission not granted. Click Start to request permission.', 'warning');
+                } else if (permissionStatus === 'granted') {
+                    updateStatus('Microphone permission granted', 'success');
+                }
+                
+            } catch (error) {
+                logError('Permission check failed: ' + error.message);
+                document.getElementById('permission-details').textContent = 'Permission check failed: ' + error.message;
+            }
+        }
+
+        function toggleSpeechRecognition() {
+            if (!window.webkitSpeechRecognition && !window.SpeechRecognition) {
+                updateStatus('Your browser does not support the SpeechRecognition API', 'error');
+                logError('SpeechRecognition API not supported');
+                return;
+            }
+            
+            if (transcriptionInProgress) {
+                transcriptionInProgress.stop();
+                updateStatus('Stopping transcription...', 'info');
+            } else {
+                let btn = document.getElementById("transcribe-now");
+                transcriptionInProgress = window.webkitSpeechRecognition ? 
+                    new webkitSpeechRecognition() : new SpeechRecognition();
+                
+                transcriptionInProgress.lang = document.getElementById("language-selector").value || "en-US";
+                transcriptionInProgress.interimResults = true;
+                transcriptionInProgress.continuous = true;
+                
+                transcriptionInProgress.addEventListener("result", function(e) {
+                    let transcript = '';
+                    for (let i = e.resultIndex; i < e.results.length; i++) {
+                        if (e.results[i].isFinal) {
+                            transcript += e.results[i][0].transcript;
+                        }
+                    }
+                    if (transcript) {
+                        document.getElementById("results").textContent += transcript + ' ';
+                    }
+                    updateStatus('Transcribing...', 'info');
+                });
+                
+                transcriptionInProgress.addEventListener("end", function(e) {
+                    transcriptionInProgress = null;
+                    btn.innerHTML = '<i class="fa fa-circle"></i>Start';
+                    updateStatus('Transcription stopped', 'info');
+                    logError('Recognition ended');
+                });
+                
+                transcriptionInProgress.addEventListener("start", function(e) {
+                    btn.innerHTML = '<i class="fa fa-square"></i>Stop';
+                    updateStatus('Transcription started', 'success');
+                });
+                
+                transcriptionInProgress.addEventListener("error", function(e) {
+                    logError('Speech recognition error: ' + e.error);
+                    updateStatus('Error: ' + e.error, 'error');
+                });
+                
+                try {
+                    transcriptionInProgress.start();
+                } catch (error) {
+                    logError('Failed to start recognition: ' + error.message);
+                    updateStatus('Failed to start recognition', 'error');
+                }
+            }
+        }
+
+        function clearResults() {
+            document.getElementById("results").textContent = '';
+            errorLog = [];
+            document.getElementById('error-details').textContent = 'No errors yet';
+            updateStatus('Results cleared', 'info');
+        }
+
+        function createSelectorForLanguageCodes() {
+            let commonLanguageLocales = [
+                "en-US", "en-GB", "pa-IN", "hi-IN", "es-ES", "fr-FR", "de-DE", "it-IT", 
+                "pt-BR", "ru-RU", "ja-JP", "ko-KR", "zh-CN", "ar-SA", "tr-TR", "nl-NL"
+            ];
+            let container = document.getElementById("language-selector");
+            
+            // Clear existing options except the first few
+            while (container.children.length > 4) {
+                container.removeChild(container.lastChild);
+            }
+            
+            commonLanguageLocales.forEach(function(code) {
+                if (!Array.from(container.children).some(opt => opt.value === code)) {
+                    let opt = document.createElement("option");
+                    opt.innerHTML = code;
+                    opt.setAttribute("value", code);
+                    container.appendChild(opt);
+                }
+            });
+        }
+
+        // Initialize on page load
+        window.addEventListener("load", function() {
+            checkBrowserInfo();
+            checkSpeechAPISupport();
+            checkPermissions();
+            createSelectorForLanguageCodes();
+        });
+    </script>
+</body>
+</html> 

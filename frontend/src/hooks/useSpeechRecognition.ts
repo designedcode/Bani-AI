@@ -57,6 +57,11 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
 
     speechRecognitionManager.on('error', (errorMessage) => {
       setError(errorMessage);
+      
+      // Mobile-specific error handling
+      if (errorMessage.includes('HTTPS') || errorMessage.includes('permission')) {
+        console.log('[useSpeechRecognition] Mobile-specific error detected:', errorMessage);
+      }
     });
 
     speechRecognitionManager.on('noSpeechCount', (count) => {

@@ -22,6 +22,18 @@ class SpeechRecognitionManager {
     voiceThreshold: 0.1
   };
 
+  // Mobile-specific configuration
+  private isMobileChrome(): boolean {
+    const userAgent = navigator.userAgent;
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+    const isChrome = /Chrome/.test(userAgent) && !/Edge/.test(userAgent);
+    return isMobile && isChrome;
+  }
+
+  private checkHTTPS(): boolean {
+    return location.protocol === 'https:';
+  }
+
   constructor() {
     this.initializeAudioDetection();
   }
@@ -41,6 +53,12 @@ class SpeechRecognitionManager {
       return false;
     }
 
+    // Check HTTPS requirement for mobile
+    if (this.isMobileChrome() && !this.checkHTTPS()) {
+      this.emitError('Web Speech API requires HTTPS on mobile devices');
+      return false;
+    }
+
     // Clean up existing recognition
     if (this.recognition) {
       try {
@@ -54,6 +72,14 @@ class SpeechRecognitionManager {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     this.recognition = new SpeechRecognition();
 
+    // Mobile Chrome specific configuration
+    if (this.isMobileChrome()) {
+      console.log('[SpeechManager] Mobile Chrome detected, applying mobile-specific config');
+      // Mobile Chrome may need different settings
+      this.config.continuous = false; // Mobile Chrome often works better with continuous=false
+      this.config.restartDelay = 1200; // Longer delay for mobile
+    }
+
     this.setupRecognitionHandlers();
     console.log('[SpeechManager] Initialized successfully');
     return true;
@@ -66,6 +92,7 @@ class SpeechRecognitionManager {
     this.recognition.interimResults = this.config.interimResults;
     this.recognition.lang = this.config.language;
 
+    // Mobile Chrome specific error handling
     this.recognition.onstart = () => {
       console.log('[SpeechManager] Recognition started');
       this.setState(SpeechState.LISTENING);
@@ -100,6 +127,19 @@ class SpeechRecognitionManager {
 
     this.recognition.onerror = (event) => {
       console.log('[SpeechManager] Recognition error:', event.error);
+
+      // Mobile Chrome specific error handling
+      if (this.isMobileChrome()) {
+        if (event.error === 'not-allowed') {
+          this.emitError('Microphone permission denied. Please enable microphone access in browser settings.');
+          this.setState(SpeechState.STOPPED);
+          return;
+        } else if (event.error === 'network') {
+          this.emitError('Network error. Please check your internet connection.');
+          this.setState(SpeechState.STOPPED);
+          return;
+        }
+      }
 
       if (event.error === 'no-speech') {
         this.handleNoSpeechError();
@@ -193,6 +233,24 @@ class SpeechRecognitionManager {
   start(): void {
     // Always create a fresh recognition instance to avoid state issues
     if (!this.initialize()) return;
+
+    // Mobile Chrome specific startup sequence
+    if (this.isMobileChrome()) {
+      console.log('[SpeechManager] Mobile Chrome detected, using mobile startup sequence');
+      // For mobile Chrome, we need to ensure proper initialization
+      setTimeout(() => {
+        if (!this.isManuallyStoppedRef) {
+          try {
+            this.recognition!.start();
+            console.log('[SpeechManager] Mobile Chrome recognition started');
+          } catch (error) {
+            console.log('[SpeechManager] Mobile Chrome start failed:', error);
+            this.emitError('Failed to start speech recognition on mobile. Please check microphone permissions.');
+          }
+        }
+      }, 100);
+      return;
+    }
 
     try {
       this.recognition!.start();

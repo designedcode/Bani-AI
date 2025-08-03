@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mobile Speech Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        .test-section {
+            background: #f5f5f5;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        button:hover { background: #0056b3; }
+        #results {
+            background: white;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            min-height: 100px;
+            margin: 10px 0;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .warning { background: #fff3cd; color: #856404; }
+    </style>
+</head>
+<body>
+    <h1>Mobile Speech Recognition Test</h1>
+    
+    <div class="test-section">
+        <h3>Browser Info</h3>
+        <div id="browser-info">Loading...</div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Speech API Test</h3>
+        <div id="speech-status">Checking...</div>
+        <button onclick="testSpeechAPI()">Test Speech API</button>
+    </div>
+    
+    <div class="test-section">
+        <h3>Simple Test</h3>
+        <button onclick="startSimpleTest()">Start Simple Test</button>
+        <button onclick="stopSimpleTest()">Stop Test</button>
+        <div id="results">Results will appear here...</div>
+    </div>
+
+    <script>
+        let recognition = null;
+        
+        function updateStatus(message, type = 'success') {
+            document.getElementById('speech-status').innerHTML = 
+                `<div class="status ${type}">${message}</div>`;
+        }
+        
+        function checkBrowser() {
+            const userAgent = navigator.userAgent;
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+            const isChrome = /Chrome/.test(userAgent) && !/Edge/.test(userAgent);
+            const isHTTPS = location.protocol === 'https:';
+            
+            const info = `
+                <strong>Browser Information:</strong><br>
+                Mobile: ${isMobile ? 'Yes' : 'No'}<br>
+                Chrome: ${isChrome ? 'Yes' : 'No'}<br>
+                HTTPS: ${isHTTPS ? 'Yes' : 'No'}<br>
+                User Agent: ${userAgent}<br>
+                Protocol: ${location.protocol}<br>
+                Host: ${location.host}
+            `;
+            
+            document.getElementById('browser-info').innerHTML = info;
+            
+            if (!isHTTPS) {
+                updateStatus('⚠️ WARNING: HTTPS required for mobile speech recognition', 'warning');
+            } else if (isMobile && isChrome) {
+                updateStatus('✅ Mobile Chrome detected with HTTPS', 'success');
+            } else {
+                updateStatus('ℹ️ Desktop or non-Chrome browser detected', 'success');
+            }
+        }
+        
+        function testSpeechAPI() {
+            const hasWebkit = 'webkitSpeechRecognition' in window;
+            const hasStandard = 'SpeechRecognition' in window;
+            
+            if (hasWebkit || hasStandard) {
+                updateStatus('✅ Speech API is supported', 'success');
+            } else {
+                updateStatus('❌ Speech API not supported', 'error');
+            }
+        }
+        
+        function startSimpleTest() {
+            if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+                updateStatus('❌ Speech recognition not supported', 'error');
+                return;
+            }
+            
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            
+            recognition.lang = 'en-US';
+            recognition.interimResults = true;
+            recognition.continuous = false;
+            
+            recognition.onstart = () => {
+                updateStatus('🎤 Recognition started - speak now!', 'success');
+            };
+            
+            recognition.onresult = (event) => {
+                let transcript = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    if (event.results[i].isFinal) {
+                        transcript += event.results[i][0].transcript;
+                    }
+                }
+                if (transcript) {
+                    document.getElementById('results').textContent += transcript + ' ';
+                }
+            };
+            
+            recognition.onerror = (event) => {
+                updateStatus(`❌ Error: ${event.error}`, 'error');
+                console.error('Speech recognition error:', event.error);
+            };
+            
+            recognition.onend = () => {
+                updateStatus('⏹️ Recognition ended', 'success');
+                recognition = null;
+            };
+            
+            try {
+                recognition.start();
+            } catch (error) {
+                updateStatus(`❌ Failed to start: ${error.message}`, 'error');
+            }
+        }
+        
+        function stopSimpleTest() {
+            if (recognition) {
+                recognition.stop();
+            }
+        }
+        
+        // Initialize on load
+        window.addEventListener('load', () => {
+            checkBrowser();
+            testSpeechAPI();
+        });
+    </script>
+</body>
+</html> 

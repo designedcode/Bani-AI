@@ -1,15 +1,22 @@
 import React from 'react';
 import './TranscriptionPanel.css';
+import { MobileSpeechHelper } from './MobileSpeechHelper';
 
 interface TranscriptionPanelProps {
   transcribedText: string;
   isListening: boolean;
+  error?: string;
+  onRetry?: () => void;
 }
 
 const TranscriptionPanel: React.FC<TranscriptionPanelProps> = ({ 
   transcribedText, 
-  isListening 
+  isListening,
+  error,
+  onRetry
 }) => {
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
   return (
     <div className="transcription-panel">
       <div className="panel-header">
@@ -18,6 +25,12 @@ const TranscriptionPanel: React.FC<TranscriptionPanelProps> = ({
           {isListening ? '🔴 Recording...' : '⚪ Idle'}
         </div>
       </div>
+      
+      <MobileSpeechHelper 
+        error={error || ''} 
+        isMobile={isMobile} 
+        onRetry={onRetry || (() => {})} 
+      />
       
       <div className="transcription-content">
         {transcribedText ? (
