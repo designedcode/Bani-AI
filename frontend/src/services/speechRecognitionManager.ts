@@ -22,6 +22,18 @@ class SpeechRecognitionManager {
     voiceThreshold: 0.1
   };
 
+  // Mobile-specific config that matches working test page
+  private getMobileConfig() {
+    return {
+      language: 'pa-IN', // Keep Punjabi since it's supported
+      continuous: true,   // Match working test page
+      interimResults: true,
+      maxNoSpeechErrors: 1, // Lower threshold for mobile
+      restartDelay: 1000,
+      voiceThreshold: 0.1
+    };
+  }
+
   // Mobile-specific configuration
   private isMobileChrome(): boolean {
     const userAgent = navigator.userAgent;
@@ -61,14 +73,90 @@ class SpeechRecognitionManager {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     this.recognition = new SpeechRecognition();
 
-    // Mobile Chrome specific configuration
+    // Mobile Chrome specific configuration - match working test page
     console.log('[SpeechManager] Mobile Chrome detected, applying mobile-specific config');
-    this.config.continuous = false; // Mobile Chrome often works better with continuous=false
-    this.config.restartDelay = 1200; // Longer delay for mobile
+    const mobileConfig = this.getMobileConfig();
+    this.config.continuous = mobileConfig.continuous;
+    this.config.language = mobileConfig.language;
+    this.config.maxNoSpeechErrors = mobileConfig.maxNoSpeechErrors;
+    this.config.restartDelay = mobileConfig.restartDelay;
 
     this.setupRecognitionHandlers();
     console.log('[SpeechManager] Mobile initialization completed');
     return true;
+  }
+
+  // Mobile-specific start method that matches working test page exactly
+  startForMobile(): void {
+    if (!this.isMobileChrome()) {
+      this.start();
+      return;
+    }
+
+    console.log('[SpeechManager] Mobile Chrome start requested - using simplified approach');
+    
+    // Clean up existing recognition
+    if (this.recognition) {
+      try {
+        this.recognition.abort();
+      } catch (e) {
+        // Ignore errors when aborting
+      }
+      this.recognition = null;
+    }
+
+    // Create fresh recognition instance like test page
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    this.recognition = new SpeechRecognition();
+    
+    // Set configuration exactly like working test page
+    this.recognition.lang = 'pa-IN';
+    this.recognition.interimResults = true;
+    this.recognition.continuous = true;
+    
+    // Set up simple event handlers like test page
+    this.recognition.onstart = () => {
+      console.log('[SpeechManager] Mobile recognition started');
+      this.setState(SpeechState.LISTENING);
+      this.isManuallyStoppedRef = false;
+    };
+    
+    this.recognition.onresult = (event) => {
+      console.log('[SpeechManager] Mobile result received:', event.results.length, 'results');
+      
+      let transcript = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          transcript += event.results[i][0].transcript;
+        }
+      }
+      
+      if (transcript) {
+        console.log('[SpeechManager] Mobile final transcript:', transcript);
+        this.emitResult({ transcript, confidence: 0.8, isFinal: true });
+      }
+    };
+    
+    this.recognition.onend = () => {
+      console.log('[SpeechManager] Mobile recognition ended');
+      this.setState(SpeechState.STOPPED);
+      this.recognition = null;
+    };
+    
+    this.recognition.onerror = (event) => {
+      console.log('[SpeechManager] Mobile recognition error:', event.error);
+      this.emitError(`Speech recognition error: ${event.error}`);
+      this.setState(SpeechState.STOPPED);
+    };
+    
+    // Start recognition
+    try {
+      console.log('[SpeechManager] Starting mobile Chrome recognition');
+      this.recognition.start();
+    } catch (error) {
+      console.log('[SpeechManager] Mobile Chrome start failed:', error);
+      this.emitError('Failed to start speech recognition on mobile. Please check microphone permissions.');
+    }
   }
 
   constructor() {
@@ -109,12 +197,14 @@ class SpeechRecognitionManager {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     this.recognition = new SpeechRecognition();
 
-    // Mobile Chrome specific configuration
+    // Mobile Chrome specific configuration - match working test page
     if (this.isMobileChrome()) {
       console.log('[SpeechManager] Mobile Chrome detected, applying mobile-specific config');
-      // Mobile Chrome may need different settings
-      this.config.continuous = false; // Mobile Chrome often works better with continuous=false
-      this.config.restartDelay = 1200; // Longer delay for mobile
+      const mobileConfig = this.getMobileConfig();
+      this.config.continuous = mobileConfig.continuous;
+      this.config.language = mobileConfig.language;
+      this.config.maxNoSpeechErrors = mobileConfig.maxNoSpeechErrors;
+      this.config.restartDelay = mobileConfig.restartDelay;
     }
 
     this.setupRecognitionHandlers();
@@ -131,12 +221,14 @@ class SpeechRecognitionManager {
 
     // Mobile Chrome specific error handling
     this.recognition.onstart = () => {
-      console.log('[SpeechManager] Recognition started');
+      console.log('[SpeechManager] Recognition started - mobile Chrome:', this.isMobileChrome());
       this.setState(SpeechState.LISTENING);
       this.isManuallyStoppedRef = false;
     };
 
     this.recognition.onresult = (event) => {
+      console.log('[SpeechManager] Result received:', event.results.length, 'results');
+      
       let transcript = '';
       let interim = '';
       let maxConfidence = 0;
@@ -144,6 +236,7 @@ class SpeechRecognitionManager {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i][0];
         const confidence = result.confidence || 0;
+        console.log('[SpeechManager] Result:', result.transcript, 'confidence:', confidence, 'isFinal:', event.results[i].isFinal);
 
         if (event.results[i].isFinal) {
           transcript += result.transcript;
@@ -155,17 +248,19 @@ class SpeechRecognitionManager {
 
       // Emit results for both final and interim
       if (transcript) {
+        console.log('[SpeechManager] Emitting final transcript:', transcript);
         this.emitResult({ transcript, confidence: maxConfidence, isFinal: true });
       }
       if (interim) {
+        console.log('[SpeechManager] Emitting interim transcript:', interim);
         this.emitResult({ transcript: interim, confidence: 0, isFinal: false });
       }
     };
 
     this.recognition.onerror = (event) => {
-      console.log('[SpeechManager] Recognition error:', event.error);
+      console.log('[SpeechManager] Recognition error:', event.error, '- mobile Chrome:', this.isMobileChrome());
 
-      // Mobile Chrome specific error handling
+      // Mobile Chrome specific error handling - simplified like test page
       if (this.isMobileChrome()) {
         if (event.error === 'not-allowed') {
           this.emitError('Microphone permission denied. Please enable microphone access in browser settings.');
@@ -173,6 +268,11 @@ class SpeechRecognitionManager {
           return;
         } else if (event.error === 'network') {
           this.emitError('Network error. Please check your internet connection.');
+          this.setState(SpeechState.STOPPED);
+          return;
+        } else if (event.error === 'no-speech') {
+          // For mobile, just stop on no-speech (like test page)
+          console.log('[SpeechManager] Mobile Chrome no-speech error - stopping');
           this.setState(SpeechState.STOPPED);
           return;
         }

@@ -110,11 +110,11 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     
     if (isMobileChrome) {
       console.log('[useSpeechRecognition] Mobile Chrome detected, using mobile startup');
-      // For mobile Chrome, we need to reinitialize on user interaction
-      speechRecognitionManager.initializeForMobile();
+      // Use mobile-specific start method
+      speechRecognitionManager.startForMobile();
+    } else {
+      speechRecognitionManager.start();
     }
-    
-    speechRecognitionManager.start();
   }, []);
 
   const stop = useCallback(() => {
