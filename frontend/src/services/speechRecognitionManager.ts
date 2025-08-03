@@ -31,7 +31,7 @@ class SpeechRecognitionManager {
   }
 
   private checkHTTPS(): boolean {
-    return location.protocol === 'https:';
+    return window.location.protocol === 'https:';
   }
 
   constructor() {

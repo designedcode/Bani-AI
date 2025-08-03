@@ -14,7 +14,7 @@ export const MobileSpeechHelper: React.FC<MobileSpeechHelperProps> = ({
 }) => {
   const [showHelp, setShowHelp] = useState(false);
 
-  const isHTTPS = location.protocol === 'https:';
+  const isHTTPS = window.location.protocol === 'https:';
   const isMobileChrome = isMobile && /Chrome/.test(navigator.userAgent);
 
   const getTroubleshootingSteps = () => {
