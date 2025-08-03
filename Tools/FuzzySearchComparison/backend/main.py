@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize fuzzy search comparator with SGGSO.txt
-fuzzy_comparator = FuzzySearchComparator("data/SGGSO.txt", "data/fuzzy_comparisons.db")
+fuzzy_comparator = FuzzySearchComparator("../data/SGGSO.txt", "../data/fuzzy_comparisons.db")
 
 # Pydantic models for fuzzy comparison API
 class FuzzySearchRequest(BaseModel):
