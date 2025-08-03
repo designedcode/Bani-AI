@@ -7,6 +7,7 @@ import MetadataPills from './components/MetadataPills';
 import { transcriptionService } from './services/transcriptionService';
 import { banidbService } from './services/banidbService';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
+import { useSacredWordDetection } from './hooks/useSacredWordDetection';
 
 
 
@@ -25,6 +26,7 @@ function App() {
   const wordCountTriggeredRef = useRef(false); // Track if 5+ words have been reached
   const [subtitleText, setSubtitleText] = useState('');
   const [showMatchedSubtitle, setShowMatchedSubtitle] = useState(false);
+  const [isFiltering, setIsFiltering] = useState(false);
   const MATCH_DISPLAY_DELAY = 1800; // ms
 
   // Use the new speech recognition hook
@@ -39,6 +41,9 @@ function App() {
     returnToLoadingOverlay,
     resetTranscription
   } = useSpeechRecognition();
+
+  // Initialize sacred word detection for API filtering
+  const { detectInTranscript } = useSacredWordDetection();
 
   // Simple function to send transcription data via HTTP (no debouncing)
   const sendTranscription = useCallback(async (text: string, confidence: number) => {
@@ -116,16 +121,52 @@ function App() {
       return;
     }
 
-    // Check word count on COMBINED final + interim text
-    const combinedText = (transcribedText + ' ' + interimTranscript).trim();
-    const totalWordCount = combinedText.split(/\s+/).filter(word => word.length > 0).length;
-
-    // Send transcription as soon as we have 5+ words (final or interim), but only once
-    if (totalWordCount >= 5 && !wordCountTriggeredRef.current && !shabadsLoadedRef.current && !transcriptionSentRef.current) {
-      wordCountTriggeredRef.current = true; // Mark that we've triggered the 5+ word condition
-      sendTranscription(combinedText, 0.8); // Default confidence since we don't get it from the hook
+    // Don't process if currently filtering
+    if (isFiltering) {
+      return;
     }
-  }, [transcribedText, interimTranscript, sendTranscription, noSpeechCount]);
+
+    // First apply sacred word filtering to the combined text
+    const combinedText = (transcribedText + ' ' + interimTranscript).trim();
+    
+    if (!combinedText) {
+      return;
+    }
+
+    setIsFiltering(true);
+    
+    try {
+      const detection = detectInTranscript(combinedText, 'general');
+      let filteredTextForAPI = detection.filteredTranscript;
+      
+      // Double-check: if sacred words still present, apply additional filtering
+      const sacredPatterns = ['ਵਾਹਿਗੁਰੂ', 'ਜੀ ਕਾ ਖਾਲਸਾ', 'ਜੀ ਕੀ ਫਤਿਹ', 'ਇਕ ਓਕਾਰ', 'ਸਤਿਗੁਰ ਪ੍ਰਸਾਦਿ'];
+      sacredPatterns.forEach(pattern => {
+        if (filteredTextForAPI.includes(pattern)) {
+          filteredTextForAPI = filteredTextForAPI.replace(new RegExp(pattern, 'gi'), '').replace(/\s+/g, ' ').trim();
+        }
+      });
+      
+      // Count words on the FILTERED text (not the raw text)
+      const filteredWordCount = filteredTextForAPI.split(/\s+/).filter(word => word.length > 0).length;
+
+      console.log('[App] Original combined text:', combinedText);
+      console.log('[App] Filtered text for API:', filteredTextForAPI);
+      console.log('[App] Filtered word count:', filteredWordCount);
+
+      // Send transcription only if filtered text has 5+ words (and other conditions met)
+      if (filteredWordCount >= 5 && !wordCountTriggeredRef.current && !shabadsLoadedRef.current && !transcriptionSentRef.current) {
+        wordCountTriggeredRef.current = true; // Mark that we've triggered the 5+ word condition
+        
+        console.log('[App] Triggering API call with filtered text');
+        sendTranscription(filteredTextForAPI, 0.8); // Send filtered text to API
+      } else if (filteredWordCount < 5 && combinedText.split(/\s+/).filter(word => word.length > 0).length >= 5) {
+        console.log('[App] Sacred words filtered out - not enough remaining words for API call');
+      }
+    } finally {
+      setIsFiltering(false);
+    }
+  }, [transcribedText, interimTranscript, sendTranscription, noSpeechCount, isFiltering]);
 
   // Handle speech recognition errors
   useEffect(() => {

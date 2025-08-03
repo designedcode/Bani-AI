@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { speechRecognitionManager } from '../services/speechRecognitionManager';
 import { SpeechState, SpeechRecognitionResult } from '../types/speechRecognition';
+import { useSacredWordDetection } from './useSacredWordDetection';
 
 interface UseSpeechRecognitionReturn {
   isListening: boolean;
@@ -24,8 +25,11 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
   const [noSpeechCount, setNoSpeechCount] = useState(0);
   const [speechState, setSpeechState] = useState<SpeechState>(SpeechState.IDLE);
   const [volume, setVolume] = useState(0);
-  
+
   const volumeUpdateRef = useRef<number | null>(null);
+
+  // Initialize sacred word detection hook
+  const { detectInTranscript } = useSacredWordDetection();
 
   // Initialize speech recognition manager
   useEffect(() => {
@@ -39,7 +43,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     speechRecognitionManager.on('stateChange', (state) => {
       setSpeechState(state);
       setIsListening(state === SpeechState.LISTENING);
-      
+
       // Clear error when successfully listening
       if (state === SpeechState.LISTENING) {
         setError('');
@@ -48,10 +52,26 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
 
     speechRecognitionManager.on('result', (result: SpeechRecognitionResult) => {
       if (result.isFinal) {
-        setTranscribedText(prev => prev + result.transcript);
+        // Run sacred word detection on just the new final transcript
+        const detection = detectInTranscript(result.transcript, 'general');
+        
+        console.log('[SpeechRecognition] Original final transcript:', result.transcript);
+        console.log('[SpeechRecognition] Filtered final transcript:', detection.filteredTranscript);
+        
+        // Add only the filtered new transcript to the previous text
+        setTranscribedText(prev => {
+          const newText = prev + (detection.filteredTranscript ? ' ' + detection.filteredTranscript : '');
+          return newText.trim();
+        });
         setInterimTranscript(''); // Clear interim when we get final result
       } else {
-        setInterimTranscript(result.transcript);
+        // For interim results, run detection on combined text for better context
+        const combinedText = (transcribedText + ' ' + result.transcript).trim();
+        const detection = detectInTranscript(combinedText, 'general');
+        
+        // Extract just the interim part from the filtered result
+        const filteredInterim = detection.filteredTranscript.replace(transcribedText, '').trim();
+        setInterimTranscript(filteredInterim);
       }
     });
 
@@ -68,7 +88,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
       setTranscribedText('');
       setInterimTranscript('');
       setError('');
-      
+
       // Force a synchronous clear by using a timeout to ensure state updates
       setTimeout(() => {
         setTranscribedText('');
