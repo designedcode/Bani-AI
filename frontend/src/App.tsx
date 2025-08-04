@@ -8,6 +8,7 @@ import { transcriptionService } from './services/transcriptionService';
 import { banidbService } from './services/banidbService';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 import { useSacredWordDetection } from './hooks/useSacredWordDetection';
+import { removeSacredWords } from './services/sacredWordDetector';
 
 
 
@@ -44,6 +45,14 @@ function App() {
 
   // Initialize sacred word detection for API filtering
   const { detectInTranscript } = useSacredWordDetection();
+
+  // Fast comprehensive sacred word filter function
+  const applySacredWordFilter = useCallback((text: string): string => {
+    if (!text) return '';
+    
+    // Use the optimized removal function directly
+    return removeSacredWords(text);
+  }, []);
 
   // Simple function to send transcription data via HTTP (no debouncing)
   const sendTranscription = useCallback(async (text: string, confidence: number) => {
@@ -136,16 +145,8 @@ function App() {
     setIsFiltering(true);
     
     try {
-      const detection = detectInTranscript(combinedText, 'general');
-      let filteredTextForAPI = detection.filteredTranscript;
-      
-      // Double-check: if sacred words still present, apply additional filtering
-      const sacredPatterns = ['ਵਾਹਿਗੁਰੂ', 'ਜੀ ਕਾ ਖਾਲਸਾ', 'ਜੀ ਕੀ ਫਤਿਹ', 'ਇਕ ਓਕਾਰ', 'ਸਤਿਗੁਰ ਪ੍ਰਸਾਦਿ'];
-      sacredPatterns.forEach(pattern => {
-        if (filteredTextForAPI.includes(pattern)) {
-          filteredTextForAPI = filteredTextForAPI.replace(new RegExp(pattern, 'gi'), '').replace(/\s+/g, ' ').trim();
-        }
-      });
+      // Fast sacred word filtering
+      const filteredTextForAPI = applySacredWordFilter(combinedText);
       
       // Count words on the FILTERED text (not the raw text)
       const filteredWordCount = filteredTextForAPI.split(/\s+/).filter(word => word.length > 0).length;
@@ -166,7 +167,7 @@ function App() {
     } finally {
       setIsFiltering(false);
     }
-  }, [transcribedText, interimTranscript, sendTranscription, noSpeechCount, isFiltering]);
+  }, [transcribedText, interimTranscript, sendTranscription, noSpeechCount, isFiltering, applySacredWordFilter]);
 
   // Handle speech recognition errors
   useEffect(() => {
@@ -214,7 +215,7 @@ function App() {
     }
   }, [shabads]);
 
-  // Show live transcription as subtitle during loading
+  // Show live transcription as subtitle during loading (FILTERED)
   useEffect(() => {
     // Immediately clear subtitle if max no-speech errors reached
     if (noSpeechCount >= 3) {
@@ -223,10 +224,17 @@ function App() {
     }
     
     if (showLoader && !showMatchedSubtitle && !shabadsLoadedRef.current && noSpeechCount < 3) {
-      const subtitle = (transcribedText + ' ' + interimTranscript).trim();
-      setSubtitleText(subtitle);
+      const rawSubtitle = (transcribedText + ' ' + interimTranscript).trim();
+      
+      // Apply comprehensive sacred word filtering to subtitle
+      if (rawSubtitle) {
+        const filteredSubtitle = applySacredWordFilter(rawSubtitle);
+        setSubtitleText(filteredSubtitle);
+      } else {
+        setSubtitleText('');
+      }
     }
-  }, [transcribedText, interimTranscript, showLoader, showMatchedSubtitle, noSpeechCount]);
+  }, [transcribedText, interimTranscript, showLoader, showMatchedSubtitle, noSpeechCount, applySacredWordFilter]);
 
   // When SGGS match is found, show matched text as subtitle, then transition
   useEffect(() => {
@@ -349,7 +357,9 @@ function App() {
                   shabads={shabads}
                   transcribedText={(() => {
                     const combined = (transcribedText + ' ' + interimTranscript).trim();
-                    const words = combined.split(/\s+/);
+                    // Apply comprehensive sacred word filtering to the combined text
+                    const filteredCombined = applySacredWordFilter(combined);
+                    const words = filteredCombined.split(/\s+/);
                     const last4Words = words.slice(-4).join(' ');
                     return last4Words;
                   })()}

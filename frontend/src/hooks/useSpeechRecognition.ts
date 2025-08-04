@@ -52,25 +52,30 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
 
     speechRecognitionManager.on('result', (result: SpeechRecognitionResult) => {
       if (result.isFinal) {
-        // Run sacred word detection on just the new final transcript
-        const detection = detectInTranscript(result.transcript, 'general');
-        
-        console.log('[SpeechRecognition] Original final transcript:', result.transcript);
-        console.log('[SpeechRecognition] Filtered final transcript:', detection.filteredTranscript);
-        
-        // Add only the filtered new transcript to the previous text
+        // For final results, apply filtering to the complete context
         setTranscribedText(prev => {
-          const newText = prev + (detection.filteredTranscript ? ' ' + detection.filteredTranscript : '');
-          return newText.trim();
+          const combinedText = (prev + ' ' + interimTranscript + ' ' + result.transcript).trim();
+          const detection = detectInTranscript(combinedText, 'general');
+          
+          console.log('[SpeechRecognition] Original final transcript:', result.transcript);
+          console.log('[SpeechRecognition] Combined text:', combinedText);
+          console.log('[SpeechRecognition] Filtered final transcript:', detection.filteredTranscript);
+          
+          // Return the completely filtered transcript
+          return detection.filteredTranscript;
         });
         setInterimTranscript(''); // Clear interim when we get final result
       } else {
-        // For interim results, run detection on combined text for better context
+        // For interim results, apply filtering to combined text
         const combinedText = (transcribedText + ' ' + result.transcript).trim();
         const detection = detectInTranscript(combinedText, 'general');
         
-        // Extract just the interim part from the filtered result
-        const filteredInterim = detection.filteredTranscript.replace(transcribedText, '').trim();
+        // Extract only the new interim part (everything after the existing transcribed text)
+        let filteredInterim = detection.filteredTranscript;
+        if (transcribedText && filteredInterim.startsWith(transcribedText)) {
+          filteredInterim = filteredInterim.substring(transcribedText.length).trim();
+        }
+        
         setInterimTranscript(filteredInterim);
       }
     });

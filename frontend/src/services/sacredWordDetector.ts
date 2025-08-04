@@ -1,165 +1,115 @@
-import Fuse from 'fuse.js'
+// Fast exact matching for sacred words - no fuzzy search needed for performance
+const SACRED_PATTERNS = [
+  // Longer phrases first (for better matching priority)
+  // 'ਸਤਿ ਨਾਮੁ ਕਰਤਾ ਪੁਰਖੁ ਨਿਰਭਉ ਨਿਰਵੈਰੁ ਅਕਾਲ ਮੂਰਤਿ ਅਜੂਨੀ ਸੈਭੰ ਗੁਰ ਪ੍ਰਸਾਦਿ',
+  'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖ਼ਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫ਼ਤਿਹ',
+  'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫਤਿਹ',
+  'ਜੀ ਕਾ ਖ਼ਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫ਼ਤਿਹ',
+  'ਜੀ ਕਾ ਖਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫਤਿਹ',
+  'ਬੋਲੇ ਸੋ ਨਿਹਾਲ ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ',
+  'ਧੰਨ ਗੁਰੂ ਨਾਨਕ',
+  'ਧਨ ਗੁਰ ਨਾਨਕ',
 
-// Define your detection rules
-interface DetectionRule {
-  patterns: string[]
-  displayText: string
-  confidence: number
-  context: 'general' | 'shabad' | 'both'
-}
+  // Three word phrases
+  'ਜੀ ਕਾ ਖਾਲਸਾ',
+  'ਜੀ ਕਾ ਖ਼ਾਲਸਾ',
+  'ਜੀ ਕੀ ਫਤਿਹ',
+  'ਜੀ ਕੀ ਫ਼ਤਿਹ',
+  'ਬੋਲੇ ਸੋ ਨਿਹਾਲ',
+  'ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ',
 
-const detectionRules: DetectionRule[] = [
-  {
-    patterns: ['ੴ', 'ਇਕ ਓਕਾਰ', 'ਇ ਓਕਾਰ', 'ਇਕ ਓਂਕਾਰ'],
-    displayText: '',
-    confidence: 70,
-    context: 'general'
-  },
-  {
-    patterns: ['ਵਾਹਿਗੁਰੂ', 'ਵਾਹਿਗੁਰੂ ਵਾਹਿਗੁਰੂ'],
-    displayText: 'ਵਾਹਿਗੁਰੂ',
-    confidence: 70,
-    context: 'both'
-  },
-  {
-    patterns: ['ਜੀ ਕਾ ਖ਼ਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫ਼ਤਿਹ'],
-    displayText: 'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖ਼ਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫ਼ਤਿਹ',
-    confidence: 70,
-    context: 'both'
-  },
-  {
-    patterns: ['ਸਤਿਗੁਰ ਪ੍ਰਸਾਦਿ'],
-    displayText: 'ੴ ਸਤਿਗੁਰ ਪ੍ਰਸਾਦਿ',
-    confidence: 70,
-    context: 'general'
-  },
-  {
-    patterns: ['ਬੋਲੇ ਸੋ ਨਿਹਾਲ', 'ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ'],
-    displayText: 'ਬੋਲੇ ਸੋ ਨਿਹਾਲ ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ',
-    confidence: 70,
-    context: 'both'
-  },
-  {
-    patterns: [
-      'ਜੀ ਕਾ ਖਾਲਸਾ', 'ਜੀ ਕੀ ਫਤਿਹ'
-    ],
-    displayText: 'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖ਼ਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫ਼ਤਿਹ',
-    confidence: 70,
-    context: 'both'
-  }
+  // Two word phrases
+  'ਵਾਹਿਗੁਰੂ ਵਾਹਿਗੁਰੂ',
+  'ਸਤਿਗੁਰ ਪ੍ਰਸਾਦਿ',
+  'ਇਕ ਓਕਾਰ',
+  'ਇ ਓਕਾਰ',
+  'ਇਕ ਓਂਕਾਰ',
+  'ਬੋਲੇ ਸੋ',
+  'ਸੋ ਨਿਹਾਲ',
+  'ਸਤਿ ਸ੍ਰੀ',
+  'ਸ੍ਰੀ ਅਕਾਲ',
+  'ਜੀ ਕਾ',
+  'ਕਾ ਖਾਲਸਾ',
+  'ਕਾ ਖ਼ਾਲਸਾ',
+  'ਜੀ ਕੀ',
+  'ਕੀ ਫਤਿਹ',
+  'ਕੀ ਫ਼ਤਿਹ',
+
+  // Single words
+  'ਵਾਹਿਗੁਰੂ',
+  'ਖਾਲਸਾ',
+  'ਖ਼ਾਲਸਾ',
+  'ਫਤਿਹ',
+  'ਫ਼ਤਿਹ',
+  'ੴ'
 ]
 
-// Prepare list of matchable patterns
-const matchList = detectionRules.flatMap(rule =>
-  rule.patterns.map(p => ({ pattern: p, rule }))
-)
+// Create a Set for O(1) lookup performance
+const PATTERN_SET = new Set(SACRED_PATTERNS.map(p => p.toLowerCase()))
 
-const fuse = new Fuse(matchList, {
-  keys: ['pattern'],
-  includeScore: true,
-  threshold: 0.6,  // More lenient: 40% match confidence required
-  ignoreLocation: true,
-  minMatchCharLength: 3,  // Minimum 3 characters must match
-  findAllMatches: false   // Stop at first good match
-})
-
-// Function you will call in your app
+// Fast exact matching function - much faster than fuzzy search
 export function detectSacredMatches(
   text: string,
   context: 'general' | 'shabad'
 ) {
-  const normalized = text.normalize('NFC').trim()
+  if (!text || text.trim().length === 0) {
+    return []
+  }
 
-  // Use fuzzy search for all matches
-  const rawResults = fuse.search(normalized)
+  const normalized = text.normalize('NFC').trim().toLowerCase()
 
-  const matches = rawResults
-    .filter(r => {
-      const rule = r.item.rule
-      const pattern = r.item.pattern
+  // Check each pattern for exact substring matches (longest first)
+  for (const pattern of SACRED_PATTERNS) {
+    const lowerPattern = pattern.toLowerCase()
 
-      // Context filter
-      if (!(rule.context === context || rule.context === 'both')) {
-        return false
-      }
+    // Fast substring check
+    if (normalized.includes(lowerPattern)) {
+      return [{
+        match: pattern,
+        displayText: pattern,
+        rule: { context: 'both' },
+        score: 1.0 // Perfect score for exact matches
+      }]
+    }
+  }
 
-      // Threshold for fuzzy matches (40% similarity)
-      if (r.score! > 0.6) {
-        return false
-      }
+  return []
+}
 
-      // Token set matching logic (similar to rapidfuzz)
-      const inputTokens = normalized.split(/\s+/).filter(token => token.length > 0)
-      const patternTokens = pattern.split(/\s+/).filter(token => token.length > 0)
+// Additional fast check function for the comprehensive filter
+export function containsSacredWords(text: string): boolean {
+  if (!text || text.trim().length === 0) {
+    return false
+  }
 
+  const normalized = text.normalize('NFC').trim().toLowerCase()
 
-
-      // Dynamic matching logic based on transcript length
-      const inputLength = inputTokens.length
-      const patternLength = patternTokens.length
-
-      // Calculate dynamic overlap threshold based on input length
-      let requiredOverlapRatio: number
-
-      if (inputLength === 1) {
-        // Single word: only match single word patterns
-        if (patternLength > 1) {
-          return false
-        }
-        requiredOverlapRatio = 1.0 // 100% match for single words
-      } else if (inputLength <= 3) {
-        // Short phrases (2-3 words): require high overlap
-        requiredOverlapRatio = 0.8 // 80% overlap
-      } else if (inputLength <= 6) {
-        // Medium phrases (4-6 words): moderate overlap
-        requiredOverlapRatio = 0.6 // 60% overlap
-      } else {
-        // Long phrases (7+ words): lower overlap requirement
-        requiredOverlapRatio = 0.4 // 40% overlap
-      }
-
-      // For multi-word inputs, check token overlap
-      if (inputLength > 1 && patternLength > 1) {
-        // Length ratio check: prevent very short inputs from matching long patterns
-        const lengthRatio = inputLength / patternLength
-
-        // Dynamic length ratio based on input length
-        let minLengthRatio: number
-        if (inputLength <= 2) {
-          minLengthRatio = 0.8 // Very strict for 1-2 words
-        } else if (inputLength <= 4) {
-          minLengthRatio = 0.6 // Moderate for 3-4 words
-        } else {
-          minLengthRatio = 0.5 // More lenient for 5+ words
-        }
-
-        if (lengthRatio < minLengthRatio) {
-          return false
-        }
-
-        // Calculate token overlap ratio
-        const commonTokens = inputTokens.filter(inputToken =>
-          patternTokens.some(patternToken =>
-            inputToken.toLowerCase() === patternToken.toLowerCase()
-          )
-        )
-
-        const overlapRatio = commonTokens.length / Math.min(inputLength, patternLength)
-
-        // Apply dynamic threshold
-        if (overlapRatio < requiredOverlapRatio) {
-          return false
-        }
-      }
-
+  // Fast check using Set lookup
+  for (const pattern of SACRED_PATTERNS) {
+    if (normalized.includes(pattern.toLowerCase())) {
       return true
-    })
-    .map(r => ({
-      match: r.item.pattern,
-      displayText: r.item.rule.displayText,
-      rule: r.item.rule,
-      score: 1 - r.score!
-    }))
+    }
+  }
 
-  return matches
+  return false
+}
+
+// Fast removal function
+export function removeSacredWords(text: string): string {
+  if (!text || text.trim().length === 0) {
+    return text
+  }
+
+  let result = text.normalize('NFC').trim()
+
+  // Remove patterns (longest first to avoid partial removal issues)
+  for (const pattern of SACRED_PATTERNS) {
+    if (result.toLowerCase().includes(pattern.toLowerCase())) {
+      // Use global case-insensitive replacement
+      const regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')
+      result = result.replace(regex, '').replace(/\s+/g, ' ').trim()
+    }
+  }
+
+  return result
 }

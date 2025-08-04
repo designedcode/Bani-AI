@@ -1,6 +1,5 @@
 import { useCallback } from 'react';
-import { detectSacredMatches } from '../services/sacredWordDetector';
-import { SpeechRecognitionResult } from '../types/speechRecognition';
+import { detectSacredMatches, removeSacredWords } from '../services/sacredWordDetector';
 
 interface SacredWordDetectionResult {
   match: string;
@@ -19,18 +18,24 @@ interface UseSacredWordDetectionReturn {
 }
 
 export function useSacredWordDetection(): UseSacredWordDetectionReturn {
-  const escapeRegExp = (string: string): string => {
-    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  };
-
   const detectInTranscript = useCallback((
     combinedText: string, 
     context: 'general' | 'shabad' = 'general'
   ): DetectionResult => {
     const trimmedText = combinedText.trim();
     
-    // Process the combined text (same as subtitle logic)
+    if (!trimmedText) {
+      return {
+        match: null,
+        filteredTranscript: ''
+      };
+    }
+
+    // Fast detection using optimized function
     const matches = detectSacredMatches(trimmedText, context);
+    
+    // Fast removal using optimized function
+    const filteredTranscript = removeSacredWords(trimmedText);
     
     if (matches.length === 0) {
       return {
@@ -39,45 +44,10 @@ export function useSacredWordDetection(): UseSacredWordDetectionReturn {
       };
     }
 
-    // Get the match with highest confidence score
-    const bestMatch = matches.reduce((prev, current) => 
-      current.score > prev.score ? current : prev
-    );
+    // Get the first match (they're already sorted by priority)
+    const bestMatch = matches[0];
 
     console.log('[SacredWordDetection] Matched word:', bestMatch.match);
-
-    // Remove the matched phrase from the transcript using multiple strategies
-    let filteredTranscript = trimmedText;
-    const matchWords = bestMatch.match.split(/\s+/);
-    
-    // Strategy 1: Try exact phrase removal first
-    const escapedMatch = escapeRegExp(bestMatch.match);
-    const exactRemoval = filteredTranscript.replace(new RegExp(`\\b${escapedMatch}\\b`, 'gi'), '');
-    
-    if (exactRemoval !== filteredTranscript && exactRemoval.trim().length < filteredTranscript.length) {
-      filteredTranscript = exactRemoval;
-    } else {
-      // Strategy 2: Remove individual words from the match
-      const inputWords = trimmedText.split(/\s+/);
-      const filteredWords = inputWords.filter(inputWord => 
-        !matchWords.some(matchWord => 
-          inputWord.toLowerCase().trim() === matchWord.toLowerCase().trim()
-        )
-      );
-      filteredTranscript = filteredWords.join(' ');
-    }
-    
-    // Strategy 3: If still contains sacred words, try more aggressive removal
-    if (matchWords.some(word => filteredTranscript.toLowerCase().includes(word.toLowerCase()))) {
-      matchWords.forEach(word => {
-        const escapedWord = escapeRegExp(word);
-        filteredTranscript = filteredTranscript.replace(new RegExp(`\\b${escapedWord}\\b`, 'gi'), '');
-      });
-    }
-    
-    // Clean up extra whitespace
-    filteredTranscript = filteredTranscript.replace(/\s+/g, ' ').trim();
-    
     console.log('[SacredWordDetection] Filtered transcript:', filteredTranscript);
 
     return {
