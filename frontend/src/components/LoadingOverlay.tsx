@@ -28,10 +28,17 @@ interface LoadingOverlayProps {
   subtitle?: React.ReactNode;
 }
 
-const LoadingOverlay: React.FC<LoadingOverlayProps> = ({ className = '', volume = 0, children, subtitle }) => {
+const LoadingOverlay: React.FC<LoadingOverlayProps> = ({ 
+  className = '', 
+  volume = 0, 
+  children, 
+  subtitle
+}) => {
   // Sensitive and less smooth (range: 1.0 to 2.0)
   const adjustedVolume = Math.pow(Math.min(volume, 1), 0.5);
   const scale = 1 + adjustedVolume * 1.0;
+
+
 
   return (
     <div className={`loading-overlay hero-black-hole hero-black-hole-visible ${className}`.trim()}>
@@ -84,7 +91,7 @@ const LoadingOverlay: React.FC<LoadingOverlayProps> = ({ className = '', volume 
           {children}
         </div>
       )}
-      {/* Subtitle rendered as a child of the overlay, not affected by scaling */}
+      {/* Subtitle */}
       {subtitle && (
         <div className="loading-overlay-subtitle">
           {subtitle}

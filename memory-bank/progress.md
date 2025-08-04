@@ -4,7 +4,7 @@
 - Real-time Punjabi audio transcription (Web Speech API)
 - Integration with BaniDB API for Gurbani search
 - Local fuzzy search on SGGS.txt
-- Real-time frontend-backend communication via WebSocket
+- HTTP REST API communication between frontend and backend
 - Modern, responsive UI with live results and audio visualization
 
 ## What's left to build

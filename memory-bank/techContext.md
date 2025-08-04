@@ -2,7 +2,7 @@
 
 ## Technologies Used
 - **Backend**: Python 3.8+, FastAPI, httpx, aiofiles, rapidfuzz, uvicorn
-- **Frontend**: React, TypeScript, Web Speech API, WebSocket
+- **Frontend**: React, TypeScript, Web Speech API, HTTP REST API
 - **Database**: External BaniDB API (no local DB)
 - **Audio Processing**: Web Speech API (browser), file uploads (backend)
 

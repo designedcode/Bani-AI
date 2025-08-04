@@ -25,7 +25,7 @@ function normalizeGurmukhi(str: string): string {
 function similarity(a: string, b: string): number {
   a = normalizeGurmukhi(a);
   b = normalizeGurmukhi(b);
-  console.log('[DEBUG] similarity input:', { a, b });
+  //console.log('[DEBUG] similarity input:', { a, b });
   if (a === b) return 1;
   if (!a.length || !b.length) return 0;
   const matrix = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
@@ -42,7 +42,7 @@ function similarity(a: string, b: string): number {
   }
   const lev = matrix[a.length][b.length];
   const result = 1 - lev / Math.max(a.length, b.length);
-  console.log('[DEBUG] similarity result:', result, 'levenshtein:', lev, 'maxLength:', Math.max(a.length, b.length));
+  //console.log('[DEBUG] similarity result:', result, 'levenshtein:', lev, 'maxLength:', Math.max(a.length, b.length));
   return result;
 }
 
@@ -63,11 +63,11 @@ function createPhrases(text: string, lengths: number[]): string[] {
 function calculateContextualScore(phrase: string, line: string, positionWeight: number = 0.3): number {
   const phraseWords = phrase.split(/\s+/);
   const lineWords = line.split(/\s+/);
-  
+
   if (!phraseWords.length || !lineWords.length) {
     return 0.0;
   }
-  
+
   // Find the best matching position in the line
   let bestScore = 0.0;
   for (let i = 0; i <= lineWords.length - phraseWords.length; i++) {
@@ -81,7 +81,7 @@ function calculateContextualScore(phrase: string, line: string, positionWeight: 
         }
       }
     }
-    
+
     if (sequenceMatch > 0) {
       // Calculate position weight (words at beginning get higher weight)
       const positionScore = 1.0 - (i / lineWords.length) * positionWeight;
@@ -89,7 +89,7 @@ function calculateContextualScore(phrase: string, line: string, positionWeight: 
       bestScore = Math.max(bestScore, currentScore);
     }
   }
-  
+
   return bestScore * 100; // Convert to percentage
 }
 
@@ -97,26 +97,26 @@ function calculateContextualScore(phrase: string, line: string, positionWeight: 
 // NOTE: This implementation assumes users read line by line sequentially and sometimes repeat verses.
 // This behavior assumption needs to be revisited in later versions for more complex user patterns.
 function progressiveFuzzySearch(
-  query: string, 
-  lines: string[], 
+  query: string,
+  lines: string[],
   highlightedLineIndex: number | null = null
 ): { bestLineIndex: number; bestScore: number } | null {
   if (!query.trim() || !lines.length) {
     return null;
   }
-  
+
   // Create phrases from the query
   const phrases = createPhrases(query, PHRASE_LENGTHS);
-  console.log('[DEBUG] Created phrases:', phrases);
-  
+  //console.log('[DEBUG] Created phrases:', phrases);
+
   let bestScore = -1;
   let bestLineIndex = -1;
-  
+
   // Determine search context
   let searchLines: string[];
   let searchIndices: number[];
   let threshold: number;
-  
+
   if (highlightedLineIndex !== null) {
     // Sequential search: current + next verse
     const startIndex = Math.max(0, highlightedLineIndex);
@@ -124,44 +124,44 @@ function progressiveFuzzySearch(
     searchLines = lines.slice(startIndex, endIndex);
     searchIndices = Array.from({ length: endIndex - startIndex }, (_, i) => startIndex + i);
     threshold = SEQUENTIAL_MATCH_THRESHOLD;
-    console.log('[DEBUG] Sequential search:', { startIndex, endIndex, threshold });
+    //console.log('[DEBUG] Sequential search:', { startIndex, endIndex, threshold });
   } else {
     // Full shabad search
     searchLines = lines;
     searchIndices = Array.from({ length: lines.length }, (_, i) => i);
     threshold = PHRASE_MATCH_THRESHOLD;
-    console.log('[DEBUG] Full shabad search:', { threshold });
+    //console.log('[DEBUG] Full shabad search:', { threshold });
   }
-  
+
   // Search through the determined context
   for (const phrase of phrases) {
     for (let i = 0; i < searchLines.length; i++) {
       const line = searchLines[i];
-      
+
       // Calculate contextual score
       const contextualScore = calculateContextualScore(phrase, line);
-      
+
       // Also try direct similarity as fallback
       const directScore = similarity(phrase, line) * 100;
-      
+
       // Use the better score
       const score = Math.max(contextualScore, directScore);
-      
+
       if (score > bestScore) {
         bestScore = score;
         bestLineIndex = searchIndices[i];
       }
     }
   }
-  
-  console.log('[DEBUG] Best match:', { bestLineIndex, bestScore, threshold });
-  
+
+  //console.log('[DEBUG] Best match:', { bestLineIndex, bestScore, threshold });
+
   if (bestScore >= threshold) {
     return { bestLineIndex, bestScore };
   } else {
     // If sequential search failed, try full shabad search as fallback
     if (highlightedLineIndex !== null) {
-      console.log('[DEBUG] Sequential search failed, trying full shabad search as fallback');
+      //console.log('[DEBUG] Sequential search failed, trying full shabad search as fallback');
       return progressiveFuzzySearch(query, lines, null);
     } else {
       return bestScore > 0 ? { bestLineIndex, bestScore } : null;
@@ -199,7 +199,7 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
       const lastShabadLines = (lastShabad?.lines_highlighted || []).length;
       if (
         (newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 2 ||
-         newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 1) &&
+          newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 1) &&
         lastShabad.shabad_id
       ) {
         onNeedNextShabad();

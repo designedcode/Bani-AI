@@ -8,14 +8,14 @@ A real-time Punjabi audio transcription system that transcribes audio in Gurmukh
 - **File Upload Support**: Upload audio files for transcription
 - **BaniDB Integration**: Search transcribed text in the Gurbani database
 - **Matra Stripping**: Intelligently strips Gurmukhi matras for better search results
-- **WebSocket Communication**: Real-time updates between frontend and backend
+- **REST API Communication**: HTTP-based communication between frontend and backend
 - **Modern UI**: React-based frontend with drag-and-drop file upload
 
 ## Tech Stack
 
 - **Backend**: FastAPI (Python)
 - **Frontend**: React with TypeScript
-- **Real-time**: WebSocket
+- **Communication**: REST API
 - **Database**: BaniDB API (external)
 - **Audio Processing**: Web Speech API
 
@@ -87,12 +87,18 @@ chmod +x start.sh
 
 ## API Endpoints
 
+### Backend API
 - `GET /api/health` - Health check
 - `POST /api/upload-audio` - Upload audio file
 - `GET /api/search` - Search BaniDB
 - `GET /api/sources` - Get available sources
 - `GET /api/strip-matras` - Test matra stripping
-- `WebSocket /ws/transcription` - Real-time transcription
+- `POST /api/transcribe` - Process transcription and return search results
+
+### Direct BaniDB Integration
+The frontend now directly calls BaniDB API for full shabad data:
+- `GET https://api.banidb.com/v2/shabads/{shabadId}` - Get full shabad
+- `GET https://api.banidb.com/v2/verse/{verseId}` - Get shabad by verse (fallback)
 
 ## Project Structure
 
@@ -115,7 +121,19 @@ Bani-AI-New-Approach/
 
 ## Configuration
 
-The application uses the BaniDB API for Gurbani search. No additional configuration is required for basic functionality.
+### Environment Variables
+
+Create a `.env` file in the frontend directory:
+
+```bash
+# BaniDB API Configuration
+REACT_APP_BANIDB_API_URL=https://api.banidb.com/v2
+
+# Backend API Configuration  
+REACT_APP_API_URL=http://localhost:8000
+```
+
+The application uses the BaniDB API for Gurbani search. The frontend now directly calls BaniDB API for better performance and reduced backend load.
 
 ## Contributing
 
