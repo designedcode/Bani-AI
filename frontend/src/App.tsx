@@ -7,8 +7,7 @@ import MetadataPills from './components/MetadataPills';
 import { transcriptionService } from './services/transcriptionService';
 import { banidbService } from './services/banidbService';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
-import { useSacredWordDetection } from './hooks/useSacredWordDetection';
-import { removeSacredWords } from './services/sacredWordDetector';
+
 
 
 
@@ -24,7 +23,7 @@ function App() {
   const shabadsBeingFetched = useRef<Set<number>>(new Set());
   const shabadsLoadedRef = useRef(false); // Track if shabads are loaded
   const transcriptionSentRef = useRef(false); // Track if we've already sent a transcription
-  const wordCountTriggeredRef = useRef(false); // Track if 5+ words have been reached
+  const wordCountTriggeredRef = useRef(false); // Track if 8+ words have been reached
   const [subtitleText, setSubtitleText] = useState('');
   const [showMatchedSubtitle, setShowMatchedSubtitle] = useState(false);
   const [isFiltering, setIsFiltering] = useState(false);
@@ -43,16 +42,7 @@ function App() {
     resetTranscription
   } = useSpeechRecognition();
 
-  // Initialize sacred word detection for API filtering
-  const { detectInTranscript } = useSacredWordDetection();
 
-  // Fast comprehensive sacred word filter function
-  const applySacredWordFilter = useCallback((text: string): string => {
-    if (!text) return '';
-    
-    // Use the optimized removal function directly
-    return removeSacredWords(text);
-  }, []);
 
   // Simple function to send transcription data via HTTP (no debouncing)
   const sendTranscription = useCallback(async (text: string, confidence: number) => {
@@ -135,7 +125,7 @@ function App() {
       return;
     }
 
-    // First apply sacred word filtering to the combined text
+    // Use pre-filtered text from speech recognition hook
     const combinedText = (transcribedText + ' ' + interimTranscript).trim();
     
     if (!combinedText) {
@@ -145,29 +135,23 @@ function App() {
     setIsFiltering(true);
     
     try {
-      // Fast sacred word filtering
-      const filteredTextForAPI = applySacredWordFilter(combinedText);
-      
-      // Count words on the FILTERED text (not the raw text)
-      const filteredWordCount = filteredTextForAPI.split(/\s+/).filter(word => word.length > 0).length;
+      // Count words on the already-filtered text from speech recognition
+      const wordCount = combinedText.split(/\s+/).filter(word => word.length > 0).length;
 
-      console.log('[App] Original combined text:', combinedText);
-      console.log('[App] Filtered text for API:', filteredTextForAPI);
-      console.log('[App] Filtered word count:', filteredWordCount);
+      console.log('[App] Pre-filtered combined text:', combinedText);
+      console.log('[App] Word count:', wordCount);
 
-      // Send transcription only if filtered text has 5+ words (and other conditions met)
-      if (filteredWordCount >= 5 && !wordCountTriggeredRef.current && !shabadsLoadedRef.current && !transcriptionSentRef.current) {
-        wordCountTriggeredRef.current = true; // Mark that we've triggered the 5+ word condition
+      // Send transcription only if text has 8+ words (and other conditions met)
+      if (wordCount >= 8 && !wordCountTriggeredRef.current && !shabadsLoadedRef.current && !transcriptionSentRef.current) {
+        wordCountTriggeredRef.current = true; // Mark that we've triggered the 8+ word condition
         
-        console.log('[App] Triggering API call with filtered text');
-        sendTranscription(filteredTextForAPI, 0.8); // Send filtered text to API
-      } else if (filteredWordCount < 5 && combinedText.split(/\s+/).filter(word => word.length > 0).length >= 5) {
-        console.log('[App] Sacred words filtered out - not enough remaining words for API call');
+        console.log('[App] Triggering API call with pre-filtered text');
+        sendTranscription(combinedText, 0.8); // Send pre-filtered text to API
       }
     } finally {
       setIsFiltering(false);
     }
-  }, [transcribedText, interimTranscript, sendTranscription, noSpeechCount, isFiltering, applySacredWordFilter]);
+  }, [transcribedText, interimTranscript, sendTranscription, noSpeechCount, isFiltering]);
 
   // Handle speech recognition errors
   useEffect(() => {
@@ -224,17 +208,11 @@ function App() {
     }
     
     if (showLoader && !showMatchedSubtitle && !shabadsLoadedRef.current && noSpeechCount < 3) {
-      const rawSubtitle = (transcribedText + ' ' + interimTranscript).trim();
-      
-      // Apply comprehensive sacred word filtering to subtitle
-      if (rawSubtitle) {
-        const filteredSubtitle = applySacredWordFilter(rawSubtitle);
-        setSubtitleText(filteredSubtitle);
-      } else {
-        setSubtitleText('');
-      }
+      // Use pre-filtered text from speech recognition hook
+      const subtitle = (transcribedText + ' ' + interimTranscript).trim();
+      setSubtitleText(subtitle);
     }
-  }, [transcribedText, interimTranscript, showLoader, showMatchedSubtitle, noSpeechCount, applySacredWordFilter]);
+  }, [transcribedText, interimTranscript, showLoader, showMatchedSubtitle, noSpeechCount]);
 
   // When SGGS match is found, show matched text as subtitle, then transition
   useEffect(() => {
@@ -356,10 +334,9 @@ function App() {
                 <FullShabadDisplay
                   shabads={shabads}
                   transcribedText={(() => {
+                    // Use pre-filtered text from speech recognition hook
                     const combined = (transcribedText + ' ' + interimTranscript).trim();
-                    // Apply comprehensive sacred word filtering to the combined text
-                    const filteredCombined = applySacredWordFilter(combined);
-                    const words = filteredCombined.split(/\s+/);
+                    const words = combined.split(/\s+/);
                     const last4Words = words.slice(-4).join(' ');
                     return last4Words;
                   })()}

@@ -14,18 +14,19 @@ export function stripGurmukhiMatras(text: string): string {
     // Normalize text
     text = text.normalize('NFC');
 
+    // Ignoring this code because now Ik Onkar is removed before reaching here in sacredWordDetector.ts
     // Remove ੴ (Ik Onkar) and common phrases explicitly
-    const ignorePatterns = [
-        '\u0A74',  // ੴ symbol (Ik Onkar)
-        'ੴ',       // ੴ symbol (Ik Onkar, literal)
-        'ਇਕ ਓਕਾਰ',  // Ek Onkar phrase
-        'ਇ ਓਕਾਰ',   // I Okaar phrase
-        'ਇਕ ਓਂਕਾਰ', // Ek Omkaar phrase
-    ];
+    // const ignorePatterns = [
+    //     '\u0A74',  // ੴ symbol (Ik Onkar)
+    //     'ੴ',       // ੴ symbol (Ik Onkar, literal)
+    //     'ਇਕ ਓਕਾਰ',  // Ek Onkar phrase
+    //     'ਇ ਓਕਾਰ',   // I Okaar phrase
+    //     'ਇਕ ਓਂਕਾਰ', // Ek Omkaar phrase
+    // ];
 
-    for (const pattern of ignorePatterns) {
-        text = text.replace(new RegExp(pattern, 'g'), '');
-    }
+    // for (const pattern of ignorePatterns) {
+    //     text = text.replace(new RegExp(pattern, 'g'), '');
+    // }
 
     // First, convert problematic characters to their base forms
     const charMappings: Record<string, string> = {

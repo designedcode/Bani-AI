@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { detectSacredMatches, removeSacredWords } from '../services/sacredWordDetector';
+import { detectAndRemoveSacredWords } from '../services/sacredWordDetector';
 
 interface SacredWordDetectionResult {
   match: string;
@@ -31,11 +31,8 @@ export function useSacredWordDetection(): UseSacredWordDetectionReturn {
       };
     }
 
-    // Fast detection using optimized function
-    const matches = detectSacredMatches(trimmedText, context);
-    
-    // Fast removal using optimized function
-    const filteredTranscript = removeSacredWords(trimmedText);
+    // Single pass detection and removal
+    const { matches, filteredText } = detectAndRemoveSacredWords(trimmedText, context);
     
     if (matches.length === 0) {
       return {
@@ -48,11 +45,11 @@ export function useSacredWordDetection(): UseSacredWordDetectionReturn {
     const bestMatch = matches[0];
 
     console.log('[SacredWordDetection] Matched word:', bestMatch.match);
-    console.log('[SacredWordDetection] Filtered transcript:', filteredTranscript);
+    console.log('[SacredWordDetection] Filtered transcript:', filteredText);
 
     return {
       match: bestMatch,
-      filteredTranscript
+      filteredTranscript: filteredText
     };
   }, []);
 

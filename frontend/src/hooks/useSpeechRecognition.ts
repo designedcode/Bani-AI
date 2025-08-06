@@ -27,9 +27,58 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
   const [volume, setVolume] = useState(0);
 
   const volumeUpdateRef = useRef<number | null>(null);
+  
+  // Use refs to track current state values for the callback
+  const transcribedTextRef = useRef('');
+  const interimTranscriptRef = useRef('');
 
   // Initialize sacred word detection hook
   const { detectInTranscript } = useSacredWordDetection();
+
+  // Update refs when state changes
+  useEffect(() => {
+    transcribedTextRef.current = transcribedText;
+  }, [transcribedText]);
+
+  useEffect(() => {
+    interimTranscriptRef.current = interimTranscript;
+  }, [interimTranscript]);
+
+  // Create stable callback for result handling
+  const handleResult = useCallback((result: SpeechRecognitionResult) => {
+    console.log('[SpeechRecognition] Processing result:', { 
+      transcript: result.transcript, 
+      isFinal: result.isFinal,
+      currentTranscribed: transcribedTextRef.current,
+      currentInterim: interimTranscriptRef.current
+    });
+
+    if (result.isFinal) {
+      // For final results, only combine previous transcribed text with the final transcript
+      // Don't include interim transcript as it's already part of the final transcript
+      const combinedText = (transcribedTextRef.current + ' ' + result.transcript).trim();
+      const detection = detectInTranscript(combinedText, 'general');
+
+      console.log('[SpeechRecognition] Final - Original transcript:', result.transcript);
+      console.log('[SpeechRecognition] Final - Combined text:', combinedText);
+      console.log('[SpeechRecognition] Final - Filtered transcript:', detection.filteredTranscript);
+
+      setTranscribedText(detection.filteredTranscript);
+      setInterimTranscript('');
+    } else {
+      // Handle interim results separately
+      const combinedText = (transcribedTextRef.current + ' ' + result.transcript).trim();
+      const detection = detectInTranscript(combinedText, 'general');
+
+      const filteredInterim = detection.filteredTranscript.substring(transcribedTextRef.current.length).trim();
+      
+      console.log('[SpeechRecognition] Interim - Original transcript:', result.transcript);
+      console.log('[SpeechRecognition] Interim - Combined text:', combinedText);
+      console.log('[SpeechRecognition] Interim - Filtered interim:', filteredInterim);
+      
+      setInterimTranscript(filteredInterim);
+    }
+  }, [detectInTranscript]);
 
   // Initialize speech recognition manager
   useEffect(() => {
@@ -50,35 +99,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
       }
     });
 
-    speechRecognitionManager.on('result', (result: SpeechRecognitionResult) => {
-      if (result.isFinal) {
-        // For final results, apply filtering to the complete context
-        setTranscribedText(prev => {
-          const combinedText = (prev + ' ' + interimTranscript + ' ' + result.transcript).trim();
-          const detection = detectInTranscript(combinedText, 'general');
-          
-          console.log('[SpeechRecognition] Original final transcript:', result.transcript);
-          console.log('[SpeechRecognition] Combined text:', combinedText);
-          console.log('[SpeechRecognition] Filtered final transcript:', detection.filteredTranscript);
-          
-          // Return the completely filtered transcript
-          return detection.filteredTranscript;
-        });
-        setInterimTranscript(''); // Clear interim when we get final result
-      } else {
-        // For interim results, apply filtering to combined text
-        const combinedText = (transcribedText + ' ' + result.transcript).trim();
-        const detection = detectInTranscript(combinedText, 'general');
-        
-        // Extract only the new interim part (everything after the existing transcribed text)
-        let filteredInterim = detection.filteredTranscript;
-        if (transcribedText && filteredInterim.startsWith(transcribedText)) {
-          filteredInterim = filteredInterim.substring(transcribedText.length).trim();
-        }
-        
-        setInterimTranscript(filteredInterim);
-      }
-    });
+    speechRecognitionManager.on('result', handleResult);
 
     speechRecognitionManager.on('error', (errorMessage) => {
       setError(errorMessage);
@@ -115,7 +136,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
       }
       speechRecognitionManager.cleanup();
     };
-  }, []);
+  }, [handleResult]);
 
   const start = useCallback(() => {
     speechRecognitionManager.start();
