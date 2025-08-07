@@ -3,15 +3,16 @@ const SACRED_PATTERNS = [
   // Longer phrases first (for better matching priority)
   'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖ਼ਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫ਼ਤਿਹ',
   'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫਤਿਹ',
+  // Mool Mantar starts
   'ਸਤਿ ਨਾਮੁ ਕਰਤਾ ਪੁਰਖੁ ਨਿਰਭਉ ਨਿਰਵੈਰੁ ਅਕਾਲ ਮੂਰਤਿ ਅਜੂਨੀ ਸੈਭੰ ਗੁਰ ਪ੍ਰਸਾਦਿ',
   'ਸਤਿਨਾਮੁ ਕਰਤਾ ਪੁਰਖੁ ਨਿਰਭਉ ਨਿਰਵੈਰੁ ਅਕਾਲ ਮੂਰਤਿ ਅਜੂਨੀ ਸੈਭੰ ਗੁਰ ਪ੍ਰਸਾਦਿ',
   'ਸਤਿ ਨਾਮੁ ਕਰਤਾ ਪੁਰਖੁ ਨਿਰਭਉ ਨਿਰਵੈਰੁ',
   'ਸਤਿਨਾਮੁ ਕਰਤਾ ਪੁਰਖੁ ਨਿਰਭਉ ਨਿਰਵੈਰੁ',
   'ਸਤਿਨਾਮੁ ਕਰਤਾ ਪੁਰਖ ਨਿਰਭਉ ਨਿਰਵੈਰੁ',
-  // Add variations without final vowel marks (ੁ) - these match speech recognition output
   'ਸਤਿਨਾਮ ਕਰਤਾ ਪੁਰਖ ਨਿਰਭਉ ਨਿਰਵੈਰ',
   'ਸਤਿ ਨਾਮ ਕਰਤਾ ਪੁਰਖ ਨਿਰਭਉ ਨਿਰਵੈਰ',
   'ਅਕਾਲ ਮੂਰਤਿ ਅਜੂਨੀ ਸੈਭੰ ਗੁਰ ਪ੍ਰਸਾਦਿ',
+  //Mool Mantar Ends
   'ਜੀ ਕਾ ਖ਼ਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫ਼ਤਿਹ',
   'ਜੀ ਕਾ ਖਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫਤਿਹ',
   'ਬੋਲੇ ਸੋ ਨਿਹਾਲ ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ',
@@ -53,7 +54,6 @@ const SACRED_PATTERNS = [
 
 // Pre-normalize patterns for consistent comparison and performance
 const NORMALIZED_PATTERNS = SACRED_PATTERNS.map(p => p.normalize('NFC'))
-const PATTERN_SET = new Set(NORMALIZED_PATTERNS)
 
 // Combined function that detects and removes sacred words in one pass
 export function detectAndRemoveSacredWords(
@@ -104,36 +104,7 @@ export function detectSacredMatches(
 
 
 
-// Additional fast check function using Set for O(1) performance
-export function containsSacredWords(text: string): boolean {
-  if (!text || text.trim().length === 0) {
-    return false
-  }
 
-  const normalized = text.normalize('NFC').trim()
-
-  // Split text into words and check combinations
-  const words = normalized.split(/\s+/)
-
-  // Check individual words first (fastest with Set lookup)
-  for (const word of words) {
-    if (PATTERN_SET.has(word)) {
-      return true
-    }
-  }
-
-  // Check multi-word combinations up to 10 words (covers longest patterns)
-  for (let i = 0; i < words.length; i++) {
-    for (let j = i + 1; j <= Math.min(words.length, i + 10); j++) {
-      const phrase = words.slice(i, j).join(' ')
-      if (PATTERN_SET.has(phrase)) {
-        return true
-      }
-    }
-  }
-
-  return false
-}
 
 // Fast removal function using optimized approach
 export function removeSacredWords(text: string): string {

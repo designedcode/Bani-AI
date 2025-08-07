@@ -4,6 +4,7 @@ import FullShabadDisplay from './components/FullShabadDisplay';
 import LoadingOverlay from './components/LoadingOverlay';
 import StickyButtons from './components/StickyButtons';
 import MetadataPills from './components/MetadataPills';
+import SacredWordOverlay from './components/SacredWordOverlay';
 import { transcriptionService } from './services/transcriptionService';
 import { banidbService } from './services/banidbService';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
@@ -29,7 +30,7 @@ function App() {
   const [isFiltering, setIsFiltering] = useState(false);
   const MATCH_DISPLAY_DELAY = 1800; // ms
 
-  // Use the new speech recognition hook
+  // Use the new speech recognition hook - keep running even when shabads are loaded
   const {
     isListening,
     transcribedText,
@@ -39,8 +40,9 @@ function App() {
     volume,
     start: startSpeechRecognition,
     returnToLoadingOverlay,
-    resetTranscription
-  } = useSpeechRecognition();
+    resetTranscription,
+    sacredWordOverlay
+  } = useSpeechRecognition(shabads.length > 0);
 
 
 
@@ -241,7 +243,7 @@ function App() {
     wordCountTriggeredRef.current = false; // Reset word count trigger flag
   }, [resetTranscription]);
 
-  // Automatically start speech recognition on mount
+  // Automatically start speech recognition on mount - SpeechRecognitionManager handles all restarts internally
   useEffect(() => {
     startSpeechRecognition();
   }, [startSpeechRecognition]);
@@ -292,6 +294,10 @@ function App() {
         className={showLoader ? '' : 'fade-out'} 
         volume={volume} 
         subtitle={showLoader ? subtitleText : undefined}
+      />
+      <SacredWordOverlay
+        isVisible={sacredWordOverlay.isVisible}
+        sacredWord={sacredWordOverlay.sacredWord}
       />
       <div style={{ display: showLoader ? 'none' : 'block' }}>
         <div className="App">
