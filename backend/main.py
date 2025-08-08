@@ -52,6 +52,11 @@ SGGS_LOADED = False
 INVERTED_INDEX_LOADED = False
 FUZZY_THRESHOLD = float(os.getenv("FUZZY_MATCH_THRESHOLD", "70"))
 
+# Enhanced fuzzy matching configuration
+FUZZY_WORD_THRESHOLD = float(os.getenv("FUZZY_WORD_THRESHOLD", "80"))  # Threshold for fuzzy word matching
+EXACT_WORD_INTERSECTION_MIN = int(os.getenv("EXACT_WORD_INTERSECTION_MIN", "5"))  # Min candidates for intersection
+FUZZY_WORD_MAX_MATCHES = int(os.getenv("FUZZY_WORD_MAX_MATCHES", "3"))  # Max fuzzy matches per word
+
 # Async loading of SGGSO.txt
 async def load_sggs_data():
     """Asynchronously load SGGSO.txt data"""
@@ -88,9 +93,45 @@ async def load_inverted_index():
 
 # rapidfuzz already imported above
 
+@lru_cache(maxsize=300)
+def get_fuzzy_word_matches(query_word: str, threshold: float = None) -> set:
+    """Get candidate lines for a single word using fuzzy matching against index"""
+    if not INVERTED_INDEX_LOADED or len(query_word) < 2:
+        return set()
+    
+    if threshold is None:
+        threshold = FUZZY_WORD_THRESHOLD
+    
+    candidates = set()
+    best_matches = []
+    
+    # Find top fuzzy matches for the word
+    for index_word in INVERTED_INDEX.keys():
+        if len(index_word) < 2:
+            continue
+            
+        # Use multiple fuzzy matching methods for better accuracy
+        partial_score = fuzz.partial_ratio(query_word, index_word)
+        token_score = fuzz.token_set_ratio(query_word, index_word)
+        
+        # Weighted score favoring partial matches for word-level matching
+        weighted_score = 0.7 * partial_score + 0.3 * token_score
+        
+        if weighted_score >= threshold:
+            best_matches.append((index_word, weighted_score))
+    
+    # Sort by score and take top matches
+    best_matches.sort(key=lambda x: x[1], reverse=True)
+    
+    # Take configurable number of top matches to avoid too much noise
+    for index_word, score in best_matches[:FUZZY_WORD_MAX_MATCHES]:
+        candidates.update(INVERTED_INDEX[index_word])
+    
+    return candidates
+
 @lru_cache(maxsize=500)
 def get_candidate_lines_from_index(query: str) -> set:
-    """Get candidate line numbers from inverted index based on query words"""
+    """Get candidate line numbers from inverted index based on query words with fuzzy matching"""
     if not INVERTED_INDEX_LOADED or not query.strip():
         return set()
     
@@ -103,14 +144,56 @@ def get_candidate_lines_from_index(query: str) -> set:
     
     candidate_lines = set()
     words_found = 0
+    fuzzy_matches = 0
     
     # For each word in query, find matching lines in inverted index
     for word in words:
+        word_candidates = set()
+        
+        # First try exact match (fastest)
         if word in INVERTED_INDEX:
-            candidate_lines.update(INVERTED_INDEX[word])
+            word_candidates.update(INVERTED_INDEX[word])
             words_found += 1
+        else:
+            # Try fuzzy matching against index words
+            best_match_score = 0
+            best_match_word = None
+            
+            # Only check fuzzy matching for words longer than 2 characters to avoid noise
+            if len(word) > 2:
+                for index_word in INVERTED_INDEX.keys():
+                    # Skip very short index words to avoid false matches
+                    if len(index_word) < 2:
+                        continue
+                        
+                    # Use partial_ratio for better matching of word parts
+                    score = fuzz.partial_ratio(word, index_word)
+                    
+                    # High threshold for fuzzy word matching to maintain precision
+                    if score >= 85 and score > best_match_score:
+                        best_match_score = score
+                        best_match_word = index_word
+                
+                # Add candidates from best fuzzy match
+                if best_match_word:
+                    word_candidates.update(INVERTED_INDEX[best_match_word])
+                    fuzzy_matches += 1
+        
+        # Add word candidates to overall candidates
+        if word_candidates:
+            if not candidate_lines:
+                # First word - use all its candidates
+                candidate_lines = word_candidates.copy()
+            else:
+                # Subsequent words - take intersection for more precise results
+                # But if intersection is too small, use union to maintain recall
+                intersection = candidate_lines.intersection(word_candidates)
+                if len(intersection) >= EXACT_WORD_INTERSECTION_MIN:  # Configurable minimum viable candidate set
+                    candidate_lines = intersection
+                else:
+                    candidate_lines.update(word_candidates)
     
-    logger.info(f"Inverted index: Found {words_found}/{len(words)} words, {len(candidate_lines)} candidate lines")
+    logger.info(f"Inverted index: Found {words_found} exact + {fuzzy_matches} fuzzy matches from {len(words)} words, {len(candidate_lines)} candidate lines")
     return candidate_lines
 
 def weighted_fuzzy_score(query: str, line: str) -> float:
@@ -126,18 +209,18 @@ def weighted_fuzzy_score(query: str, line: str) -> float:
 
 @lru_cache(maxsize=1000)
 def fuzzy_search_sggs(query: str, threshold: float = FUZZY_THRESHOLD):
-    """Two-stage fuzzy search: inverted index filtering + weighted fuzzy matching"""
+    """Enhanced three-stage fuzzy search: exact index -> fuzzy index -> full scan"""
     print(f"DEBUG: SGGS_LOADED={SGGS_LOADED}, INVERTED_INDEX_LOADED={INVERTED_INDEX_LOADED}, query='{query}'")
     if not SGGS_LOADED or not query.strip():
         print("DEBUG: Not loaded or empty query")
         return []
     
-    # Stage 1: Try inverted index approach (PRIMARY)
+    # Stage 1: Try exact word matching in inverted index (FASTEST)
     if INVERTED_INDEX_LOADED:
         candidate_line_numbers = get_candidate_lines_from_index(query)
         
         if candidate_line_numbers:
-            print(f"DEBUG: Using inverted index with {len(candidate_line_numbers)} candidates")
+            print(f"DEBUG: Using enhanced inverted index with {len(candidate_line_numbers)} candidates")
             
             # Convert line numbers to actual lines (1-indexed to 0-indexed)
             candidate_lines = []
@@ -167,8 +250,47 @@ def fuzzy_search_sggs(query: str, threshold: float = FUZZY_THRESHOLD):
             elif best_score >= 55:  # Still return decent matches
                 print(f"DEBUG: Decent candidate weighted score={best_score:.2f}, Line='{best_line}'")
                 return [(best_line, best_score)]
+        
+        # Stage 2: Try fuzzy word matching if exact matching didn't work well
+        print("DEBUG: Trying fuzzy word matching approach")
+        words = unicodedata.normalize('NFC', query.strip()).split()
+        fuzzy_candidates = set()
+        
+        for word in words:
+            word_candidates = get_fuzzy_word_matches(word)  # Uses FUZZY_WORD_THRESHOLD
+            fuzzy_candidates.update(word_candidates)
+        
+        if fuzzy_candidates:
+            print(f"DEBUG: Using fuzzy word matching with {len(fuzzy_candidates)} candidates")
+            
+            # Convert line numbers to actual lines
+            fuzzy_candidate_lines = []
+            for line_num in fuzzy_candidates:
+                if 1 <= line_num <= len(SGGS_LINES):
+                    fuzzy_candidate_lines.append(SGGS_LINES[line_num - 1])
+            
+            # Search through fuzzy candidates
+            best_score = -1
+            best_line = None
+            
+            for line in fuzzy_candidate_lines:
+                score = weighted_fuzzy_score(query, line)
+                if score >= 95:  # Early termination for excellent matches
+                    print(f"DEBUG: Fuzzy word early termination! Weighted Score={score:.2f}, Line='{line}'")
+                    return [(line, score)]
+                if score > best_score:
+                    best_score = score
+                    best_line = line
+            
+            # Return best fuzzy word match if above threshold
+            if best_score >= threshold:
+                print(f"DEBUG: Best fuzzy word weighted score={best_score:.2f}, Line='{best_line}'")
+                return [(best_line, best_score)]
+            elif best_score >= 50:  # Lower threshold for fuzzy word matches
+                print(f"DEBUG: Decent fuzzy word weighted score={best_score:.2f}, Line='{best_line}'")
+                return [(best_line, best_score)]
     
-    # Stage 2: Fallback to full-scan approach (FALLBACK)
+    # Stage 3: Fallback to full-scan approach (SLOWEST)
     print("DEBUG: Using fallback full-scan approach with weighted scoring")
     best_score = -1
     best_line = None
@@ -254,8 +376,21 @@ async def transcribe_and_search(request: TranscriptionRequest) -> TranscriptionR
 
 @app.get("/api/test-inverted-index")
 async def test_inverted_index_endpoint(query: str):
-    """Test endpoint to check inverted index functionality"""
+    """Test endpoint to check enhanced inverted index functionality"""
     candidate_lines = get_candidate_lines_from_index(query) if INVERTED_INDEX_LOADED else set()
+    
+    # Test fuzzy word matching for each word in query
+    words = unicodedata.normalize('NFC', query.strip()).split()
+    fuzzy_word_analysis = {}
+    
+    for word in words:
+        if len(word) > 2:
+            fuzzy_candidates = get_fuzzy_word_matches(word)  # Uses FUZZY_WORD_THRESHOLD
+            fuzzy_word_analysis[word] = {
+                "candidate_count": len(fuzzy_candidates),
+                "sample_lines": list(fuzzy_candidates)[:5]
+            }
+    
     fuzzy_results = fuzzy_search_sggs(query)
     
     return {
@@ -263,10 +398,23 @@ async def test_inverted_index_endpoint(query: str):
         "inverted_index_loaded": INVERTED_INDEX_LOADED,
         "sggs_loaded": SGGS_LOADED,
         "total_words_in_index": len(INVERTED_INDEX) if INVERTED_INDEX_LOADED else 0,
-        "candidate_line_count": len(candidate_lines),
-        "candidate_lines_sample": list(candidate_lines)[:10] if candidate_lines else [],
-        "fuzzy_results": fuzzy_results,
-        "total_sggs_lines": len(SGGS_LINES)
+        "exact_match_candidates": {
+            "count": len(candidate_lines),
+            "sample_lines": list(candidate_lines)[:10] if candidate_lines else []
+        },
+        "fuzzy_word_analysis": fuzzy_word_analysis,
+        "final_fuzzy_results": fuzzy_results,
+        "total_sggs_lines": len(SGGS_LINES),
+        "enhancement_info": {
+            "stages": ["exact_word_index", "fuzzy_word_matching", "full_scan_fallback"],
+            "configuration": {
+                "fuzzy_threshold": FUZZY_THRESHOLD,
+                "fuzzy_word_threshold": FUZZY_WORD_THRESHOLD,
+                "exact_word_intersection_min": EXACT_WORD_INTERSECTION_MIN,
+                "fuzzy_word_max_matches": FUZZY_WORD_MAX_MATCHES
+            },
+            "weighted_scoring": "0.7*partial + 0.3*token_set for word matching, 0.4*partial + 0.3*token_set + 0.3*ratio for line scoring"
+        }
     }
 
 
