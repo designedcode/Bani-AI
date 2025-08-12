@@ -30,7 +30,6 @@ export interface SearchResult {
 
 export interface FullTranscriptionResponse extends TranscriptionResponse {
   results: SearchResult[];
-  fallback_used: boolean;
 }
 
 class TranscriptionService {
@@ -69,21 +68,15 @@ class TranscriptionService {
 
       const backendData: TranscriptionResponse = await response.json();
 
-      // Step 2: If we have a good SGGS match, search BaniDB with it
+      // Step 2: Only search BaniDB if we have a good SGGS match
       let results: SearchResult[] = [];
-      let fallbackUsed = false;
 
       if (backendData.sggs_match_found && backendData.best_sggs_match) {
         console.log(`Using SGGS match: ${backendData.best_sggs_match}`);
-        const banidbResponse = await banidbService.searchFromSGGSLine(backendData.best_sggs_match);
-        results = banidbResponse.results.map(this.mapBaniDBResult);
-        fallbackUsed = banidbResponse.fallbackUsed;
+        const banidbResults = await banidbService.searchFromSGGSLine(backendData.best_sggs_match);
+        results = banidbResults.map(this.mapBaniDBResult);
       } else {
-        // Fallback: search BaniDB directly with transcribed text
-        console.log(`No good SGGS match, searching BaniDB directly with: ${text}`);
-        const directResults = await banidbService.searchFromSGGSLine(text);
-        results = directResults.results.map(this.mapBaniDBResult);
-        fallbackUsed = true;
+        console.log(`No good SGGS match found - no BaniDB search performed`);
       }
 
       // If no results found, refresh the page
@@ -97,8 +90,7 @@ class TranscriptionService {
 
       return {
         ...backendData,
-        results,
-        fallback_used: fallbackUsed
+        results
       };
     } catch (error) {
       console.error('Transcription service error:', error);
