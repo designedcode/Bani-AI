@@ -86,7 +86,7 @@ function App() {
         if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
           shabadsBeingFetched.current.add(newShabadId);
           try {
-            const shabadData = await banidbService.getFullShabad(newShabadId, response.results[0].verse_id);
+            const shabadData = await banidbService.getFullShabad(newShabadId);
             setShabads(prev => [...prev, shabadData]);
           } catch (err) {
             console.error('Error fetching full shabad:', err);
