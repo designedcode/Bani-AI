@@ -47,7 +47,7 @@ from pathlib import Path
 DATABASE_PATH = Path(__file__).parent / "uploads" / "shabads_verses_SGGS.db"
 VERSES_DATA = []  # List of (ShabadID, GurmukhiUni) tuples
 DATABASE_LOADED = False
-FUZZY_THRESHOLD = float(os.getenv("FUZZY_MATCH_THRESHOLD", "70"))
+FUZZY_THRESHOLD = float(os.getenv("FUZZY_MATCH_THRESHOLD", "60"))
 
 # Async loading of database verses
 async def load_database_verses():
