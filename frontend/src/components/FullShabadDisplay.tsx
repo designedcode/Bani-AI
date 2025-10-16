@@ -12,19 +12,9 @@ const SEQUENTIAL_MATCH_THRESHOLD = 40; // High recall for sequential matches
 const PHRASE_LENGTHS = [2, 3, 4]; // Try phrases of 2-4 words
 const CONTEXT_WINDOW_SIZE = 2; // Current + next verse for sequential search
 
-// Utility to remove diacritics and normalize for comparison
-function normalizeGurmukhi(str: string): string {
-  return str
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // Remove common Unicode diacritics
-    .replace(/[\u0A3C\u0A3E-\u0A4C\u0A70\u0A71]/g, '') // Remove Gurmukhi diacritics
-    .toLowerCase();
-}
 
 // Simple similarity function (Levenshtein distance based percentage)
 function similarity(a: string, b: string): number {
-  a = normalizeGurmukhi(a);
-  b = normalizeGurmukhi(b);
   //console.log('[DEBUG] similarity input:', { a, b });
   if (a === b) return 1;
   if (!a.length || !b.length) return 0;
