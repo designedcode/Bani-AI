@@ -125,6 +125,18 @@ function progressiveFuzzySearch(
     //console.log('[DEBUG] Full shabad search:', { threshold });
   }
 
+  // Extract last word from query for exact match scoring
+  const queryWords = query.trim().split(/\s+/);
+  const lastWord = queryWords.length > 0 ? queryWords[queryWords.length - 1] : '';
+
+  // Helper function to check exact match of last word in a line
+  const getLastWordMatchScore = (line: string, lastWordToMatch: string): number => {
+    if (!lastWordToMatch) return 0;
+    const lineWords = line.trim().split(/\s+/);
+    // Check if last word exactly matches any word in the line
+    return lineWords.some(word => word === lastWordToMatch) ? 100 : 0;
+  };
+
   // Search through the determined context
   for (const phrase of phrases) {
     for (let i = 0; i < searchLines.length; i++) {
@@ -136,8 +148,14 @@ function progressiveFuzzySearch(
       // Also try direct similarity as fallback
       const directScore = similarity(phrase, line) * 100;
 
-      // Use the better score
-      const score = Math.max(contextualScore, directScore);
+      // Use the better score (base score - 90% weight)
+      const baseScore = Math.max(contextualScore, directScore);
+
+      // Last word exact match score (10% weight)
+      const lastWordMatchScore = getLastWordMatchScore(line, lastWord);
+
+      // Combined weighted score: 90% base + 10% last word match
+      const score = (baseScore * 0.9) + (lastWordMatchScore * 0.1);
 
       if (score > bestScore) {
         bestScore = score;
@@ -202,7 +220,7 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
         candidatePersistenceRef.current.count = 1;
       }
       
-      // Only update highlighted line if candidate has persisted for 3 consecutive tokens
+      // Only update highlighted line if candidate has persisted for 2 consecutive tokens
       if (candidatePersistenceRef.current.count >= 3) {
         setHighlightedLineIndex(newHighlightedIndex);
         
