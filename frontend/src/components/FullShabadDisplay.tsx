@@ -36,13 +36,15 @@ function similarity(a: string, b: string): number {
   return result;
 }
 
-// Create phrases of different lengths from text
+// Create phrases of different lengths from text (only the last N words)
 function createPhrases(text: string, lengths: number[]): string[] {
   const words = text.trim().split(/\s+/);
   const phrases: string[] = [];
   for (const length of lengths) {
-    for (let i = 0; i <= words.length - length; i++) {
-      const phrase = words.slice(i, i + length).join(' ');
+    // Only create the phrase ending at the last word
+    if (words.length >= length) {
+      const startIndex = words.length - length;
+      const phrase = words.slice(startIndex, words.length).join(' ');
       phrases.push(phrase);
     }
   }
@@ -164,6 +166,13 @@ const HIGHLIGHT_THRESHOLD = 0.6; // 60% - Back to original threshold
 const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcribedText, onNeedNextShabad }) => {
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [highlightedLineIndex, setHighlightedLineIndex] = useState<number | null>(null);
+  // Track candidate persistence: only switch if same candidate is best for 2 consecutive tokens
+  const candidatePersistenceRef = useRef<{ candidate: number | null; count: number }>({ candidate: null, count: 0 });
+
+  // Reset persistence counter when shabads change
+  useEffect(() => {
+    candidatePersistenceRef.current = { candidate: null, count: 0 };
+  }, [shabads]);
 
   // Flatten all lines from all shabads
   const allLines: { line: any; shabadIndex: number; lineIndex: number }[] = [];
@@ -182,17 +191,32 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
     const result = progressiveFuzzySearch(transcribedText, gurmukhiLines, highlightedLineIndex);
     if (result) {
       const newHighlightedIndex = result.bestLineIndex;
-      setHighlightedLineIndex(newHighlightedIndex);
-      // If at second last or last line of last shabad, trigger fetch for next shabad
-      const lastShabad = shabads[shabads.length - 1];
-      const lastShabadStartIdx = allLines.findIndex(l => l.shabadIndex === shabads.length - 1 && l.lineIndex === 0);
-      const lastShabadLines = (lastShabad?.lines_highlighted || []).length;
-      if (
-        (newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 2 ||
-          newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 1) &&
-        lastShabad.shabad_id
-      ) {
-        onNeedNextShabad();
+      
+      // Persistence logic: only switch if same candidate stays best for 2 consecutive tokens
+      if (candidatePersistenceRef.current.candidate === newHighlightedIndex) {
+        // Same candidate as before, increment count
+        candidatePersistenceRef.current.count += 1;
+      } else {
+        // Different candidate, reset counter
+        candidatePersistenceRef.current.candidate = newHighlightedIndex;
+        candidatePersistenceRef.current.count = 1;
+      }
+      
+      // Only update highlighted line if candidate has persisted for 3 consecutive tokens
+      if (candidatePersistenceRef.current.count >= 3) {
+        setHighlightedLineIndex(newHighlightedIndex);
+        
+        // If at second last or last line of last shabad, trigger fetch for next shabad
+        const lastShabad = shabads[shabads.length - 1];
+        const lastShabadStartIdx = allLines.findIndex(l => l.shabadIndex === shabads.length - 1 && l.lineIndex === 0);
+        const lastShabadLines = (lastShabad?.lines_highlighted || []).length;
+        if (
+          (newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 2 ||
+            newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 1) &&
+          lastShabad.shabad_id
+        ) {
+          onNeedNextShabad();
+        }
       }
     }
   }, [shabads, transcribedText]);
