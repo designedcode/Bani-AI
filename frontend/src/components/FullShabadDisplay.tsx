@@ -36,6 +36,45 @@ function similarity(a: string, b: string): number {
   return result;
 }
 
+// Token-level Levenshtein similarity (word-by-word comparison)
+function tokenLevelSimilarity(a: string[], b: string[]): number {
+  if (a.length === 0 && b.length === 0) return 1;
+  if (a.length === 0 || b.length === 0) return 0;
+  
+  const matrix = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) matrix[i][0] = i;
+  for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+  const lev = matrix[a.length][b.length];
+  return 1 - lev / Math.max(a.length, b.length);
+}
+
+// Jaccard n-gram similarity function
+function jaccardNGrams(a: string[], b: string[], n: number = 2): number {
+  const A = new Set(a.slice(0).map((_, i) => a.slice(i, i + n).join(' ')).filter(s => s.split(' ').length === n));
+  const B = new Set(b.slice(0).map((_, i) => b.slice(i, i + n).join(' ')).filter(s => s.split(' ').length === n));
+  const aArray = Array.from(A);
+  const inter = aArray.filter(x => B.has(x)).length;
+  const union = A.size + B.size - inter || 1;
+  return inter / union;
+}
+
+// Combined token-level similarity: mix Levenshtein(token) with Jaccard(bigrams)
+function combinedTokenSimilarity(phraseTokens: string[], lineTokens: string[]): number {
+  const levToken = tokenLevelSimilarity(phraseTokens, lineTokens);
+  const jaccardScore = jaccardNGrams(phraseTokens, lineTokens, 2);
+  return 0.6 * levToken + 0.4 * jaccardScore;
+}
+
 // Create phrases of different lengths from text (only the last N words)
 function createPhrases(text: string, lengths: number[]): string[] {
   const words = text.trim().split(/\s+/);
@@ -145,11 +184,16 @@ function progressiveFuzzySearch(
       // Calculate contextual score
       const contextualScore = calculateContextualScore(phrase, line);
 
-      // Also try direct similarity as fallback
+      // Also try direct similarity as fallback (character-level Levenshtein)
       const directScore = similarity(phrase, line) * 100;
 
-      // Use the better score (base score - 90% weight)
-      const baseScore = Math.max(contextualScore, directScore);
+      // Token-level similarity with Jaccard n-grams as stabilizer
+      const phraseTokens = phrase.trim().split(/\s+/);
+      const lineTokens = line.trim().split(/\s+/);
+      const tokenBasedScore = combinedTokenSimilarity(phraseTokens, lineTokens) * 100;
+
+      // Use the best score from contextual, direct, and token-based (base score - 90% weight)
+      const baseScore = Math.max(contextualScore, directScore, tokenBasedScore);
 
       // Last word exact match score (10% weight)
       const lastWordMatchScore = getLastWordMatchScore(line, lastWord);
@@ -221,7 +265,11 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
       }
       
       // Only update highlighted line if candidate has persisted for 2 consecutive tokens
-      if (candidatePersistenceRef.current.count >= 3) {
+      if (candidatePersistenceRef.current.count >= 2) {
+        // Log score when highlight changes
+        if (highlightedLineIndex !== newHighlightedIndex) {
+          console.log('[HIGHLIGHT CHANGE] Line:', newHighlightedIndex, 'Score:', result.bestScore.toFixed(2));
+        }
         setHighlightedLineIndex(newHighlightedIndex);
         
         // If at second last or last line of last shabad, trigger fetch for next shabad
