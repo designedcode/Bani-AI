@@ -49,15 +49,26 @@
 
 ### Frontend Shabad Line Highlighting
 - Progressive fuzzy search matches transcribed text to lines in the shabad.
-- Uses phrases of 2, 3, or 4 words from the transcription.
-- Compares each phrase to each line using a custom similarity function (Levenshtein-based, normalized, diacritics removed).
-- Contextual score rewards sequential word matches and position.
+- Uses phrases of 4, 3, or 2 words from the transcription (prioritizes longer phrases first).
+- Compares each phrase to each line using multiple scoring methods:
+  - Sequence matching: checks if phrase words appear in sequential order
+  - Direct similarity: Levenshtein-based similarity with sequence priority
+  - Last word exact match: 10% weightage for exact match of last word
+- **Scoring Algorithm:**
+  - Base score: `max(contextualScore, directScore)` (90% weight)
+  - Last word match: exact match check (10% weight)
+  - Final score: `(baseScore * 0.9) + (lastWordMatchScore * 0.1)`
 - **Thresholds:**
-  - PHRASE_MATCH_THRESHOLD = 60 (for initial match)
-  - SEQUENTIAL_MATCH_THRESHOLD = 40 (for sequential/next-verse match)
-  - Word-level similarity threshold: 0.7 (for word-to-word match)
-  - HIGHLIGHT_THRESHOLD = 0.6 (for line highlighting, but actual use is via the above thresholds)
+  - PHRASE_MATCH_THRESHOLD = 50 (for initial match, reduced from 60)
+  - SEQUENTIAL_MATCH_THRESHOLD = 45 (for sequential/next-verse match, increased from 40)
+  - Word-level similarity threshold: 0.7 (for word-to-word match in sequence)
+  - Candidate persistence: 2 tokens (reduced from 3) before switching highlighted line
+- **Phrase Generation:**
+  - Only creates backward phrases (ending at the last word of transcription)
+  - Prioritizes longer phrases: tries 4-word first, then 3-word, then 2-word
 - Only the best-matching line is highlighted at a time.
+- Candidate persistence: only switches highlight if same candidate persists for 2 consecutive tokens (reduces flickering).
 - If no match is above the threshold, falls back to a broader search.
 - Auto-scrolls to the highlighted line.
-- If the last or second-last line is matched, triggers loading the next shabad. 
+- If the last or second-last line is matched, triggers loading the next shabad.
+- Logs highlight changes with associated scores for debugging. 

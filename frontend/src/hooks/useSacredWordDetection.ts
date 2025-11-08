@@ -263,7 +263,7 @@ export function useSacredWordDetection(): UseSacredWordDetectionReturn {
       match: bestMatch,
       filteredTranscript: filteredText
     };
-  }, [isMoolMantar, showOverlay, getDisplayTextForPattern, resetOverlayTimer, overlayState.isVisible]);
+  }, [isMoolMantar, showOverlay, getDisplayTextForPattern, resetOverlayTimer, overlayState.isVisible, overlayState.sacredWord]);
 
   // Function to clear tracking data (can be called externally if needed)
   const clearTrackingData = useCallback(() => {

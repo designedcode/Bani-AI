@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 
 interface FullShabadDisplayProps {
   shabads: any[];
@@ -215,12 +215,15 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
   }, [shabads]);
 
   // Flatten all lines from all shabads
-  const allLines: { line: any; shabadIndex: number; lineIndex: number }[] = [];
-  shabads.forEach((shabad, sIdx) => {
-    (shabad.lines_highlighted || []).forEach((line: any, lIdx: number) => {
-      allLines.push({ line, shabadIndex: sIdx, lineIndex: lIdx });
+  const allLines = useMemo(() => {
+    const lines: { line: any; shabadIndex: number; lineIndex: number }[] = [];
+    shabads.forEach((shabad, sIdx) => {
+      (shabad.lines_highlighted || []).forEach((line: any, lIdx: number) => {
+        lines.push({ line, shabadIndex: sIdx, lineIndex: lIdx });
+      });
     });
-  });
+    return lines;
+  }, [shabads]);
 
   // Progressive search over all lines
   useEffect(() => {
@@ -263,7 +266,7 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
         }
       }
     }
-  }, [shabads, transcribedText]);
+  }, [shabads, transcribedText, allLines, highlightedLineIndex, onNeedNextShabad]);
 
   // Smooth scroll highlighted line into center
   useEffect(() => {
