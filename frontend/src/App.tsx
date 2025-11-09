@@ -260,7 +260,7 @@ function App() {
   }, [resetTranscriptionState, returnToLoadingOverlay]);
 
   // Callback to fetch next shabad
-  const handleNeedNextShabad = async () => {
+  const handleNeedNextShabad = useCallback(async () => {
     const lastShabad = shabads[shabads.length - 1];
     const nextShabadId = lastShabad?.navigation?.next;
     console.log(`[PAGINATION] Attempting to fetch next shabad. Current: ${lastShabad?.shabad_id}, Next: ${nextShabadId}`);
@@ -286,7 +286,7 @@ function App() {
     } else {
       console.log(`[PAGINATION] Skipping fetch - nextShabadId: ${nextShabadId}, already exists: ${shabads.some(s => s.shabad_id === nextShabadId)}, being fetched: ${shabadsBeingFetched.current.has(nextShabadId)}`);
     }
-  };
+  }, [shabads]);
 
   return (
     <>

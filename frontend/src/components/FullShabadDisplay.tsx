@@ -7,7 +7,7 @@ interface FullShabadDisplayProps {
 }
 
 // Progressive search configuration
-const PHRASE_MATCH_THRESHOLD = 50; // High precision for first match
+const PHRASE_MATCH_THRESHOLD = 60; // High precision for first match
 const SEQUENTIAL_MATCH_THRESHOLD = 45; // High recall for sequential matches
 const PHRASE_LENGTHS = [4, 3, 2]; // Try phrases in order: 4-word, 3-word, then 2-word (prioritize longer phrases)
 const CONTEXT_WINDOW_SIZE = 2; // Current + next verse for sequential search
@@ -113,7 +113,9 @@ function calculateDirectScoreWithSequence(phrase: string, text: string): number 
 function progressiveFuzzySearch(
   query: string,
   lines: string[],
-  highlightedLineIndex: number | null = null
+  highlightedLineIndex: number | null = null,
+  shabadIndex: number | null = null,
+  lineToShabadMap: ((index: number) => number) | null = null
 ): { bestLineIndex: number; bestScore: number } | null {
   if (!query.trim() || !lines.length) {
     return null;
@@ -140,11 +142,28 @@ function progressiveFuzzySearch(
     threshold = SEQUENTIAL_MATCH_THRESHOLD;
     //console.log('[DEBUG] Sequential search:', { startIndex, endIndex, threshold });
   } else {
-    // Full shabad search
-    searchLines = lines;
-    searchIndices = Array.from({ length: lines.length }, (_, i) => i);
-    threshold = PHRASE_MATCH_THRESHOLD;
-    //console.log('[DEBUG] Full shabad search:', { threshold });
+    // Full shabad search (or filtered to specific shabad if shabadIndex is provided)
+    if (shabadIndex !== null && lineToShabadMap) {
+      // Filter to only lines from the specified shabad
+      const filteredLines: string[] = [];
+      const filteredIndices: number[] = [];
+      for (let i = 0; i < lines.length; i++) {
+        if (lineToShabadMap(i) === shabadIndex) {
+          filteredLines.push(lines[i]);
+          filteredIndices.push(i);
+        }
+      }
+      searchLines = filteredLines;
+      searchIndices = filteredIndices;
+      threshold = PHRASE_MATCH_THRESHOLD;
+      //console.log('[DEBUG] Filtered shabad search:', { shabadIndex, filteredCount: filteredLines.length, threshold });
+    } else {
+      // Full search across all shabads
+      searchLines = lines;
+      searchIndices = Array.from({ length: lines.length }, (_, i) => i);
+      threshold = PHRASE_MATCH_THRESHOLD;
+      //console.log('[DEBUG] Full shabad search:', { threshold });
+    }
   }
 
   // Extract last word from query for exact match scoring
@@ -192,10 +211,16 @@ function progressiveFuzzySearch(
   if (bestScore >= threshold) {
     return { bestLineIndex, bestScore };
   } else {
-    // If sequential search failed, try full shabad search as fallback
+    // If sequential search failed, try fallback search
     if (highlightedLineIndex !== null) {
-      //console.log('[DEBUG] Sequential search failed, trying full shabad search as fallback');
-      return progressiveFuzzySearch(query, lines, null);
+      // Fallback: search within current shabad only (if shabadIndex is provided)
+      if (shabadIndex !== null && lineToShabadMap) {
+        //console.log('[DEBUG] Sequential search failed, trying current shabad search as fallback');
+        return progressiveFuzzySearch(query, lines, null, shabadIndex, lineToShabadMap);
+      } else {
+        //console.log('[DEBUG] Sequential search failed, trying full shabad search as fallback');
+        return progressiveFuzzySearch(query, lines, null, null, lineToShabadMap);
+      }
     } else {
       return null;
     }
@@ -208,10 +233,13 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
   const [highlightedLineIndex, setHighlightedLineIndex] = useState<number | null>(null);
   // Track candidate persistence: only switch if same candidate is best for 2 consecutive tokens
   const candidatePersistenceRef = useRef<{ candidate: number | null; count: number }>({ candidate: null, count: 0 });
+  // Track which shabad we've already requested next shabad for
+  const nextShabadRequestedRef = useRef<number | null>(null);
 
-  // Reset persistence counter when shabads change
+  // Reset persistence counter and next shabad request tracking when shabads change
   useEffect(() => {
     candidatePersistenceRef.current = { candidate: null, count: 0 };
+    nextShabadRequestedRef.current = null;
   }, [shabads]);
 
   // Flatten all lines from all shabads
@@ -231,7 +259,14 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
     const gurmukhiLines = allLines.map(({ line }) =>
       line.gurmukhi_original || (line.gurmukhi_highlighted ? line.gurmukhi_highlighted.replace(/<[^>]+>/g, '') : '') || ''
     );
-    const result = progressiveFuzzySearch(transcribedText, gurmukhiLines, highlightedLineIndex);
+    
+    // Extract current shabad index from highlighted line
+    const currentShabadIndex = highlightedLineIndex !== null ? allLines[highlightedLineIndex].shabadIndex : null;
+    
+    // Create mapping function from line index to shabad index
+    const lineToShabadMap = (index: number) => allLines[index].shabadIndex;
+    
+    const result = progressiveFuzzySearch(transcribedText, gurmukhiLines, highlightedLineIndex, currentShabadIndex, lineToShabadMap);
     if (result) {
       const newHighlightedIndex = result.bestLineIndex;
       
@@ -260,8 +295,10 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
         if (
           (newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 2 ||
             newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 1) &&
-          lastShabad.shabad_id
+          lastShabad.shabad_id &&
+          nextShabadRequestedRef.current !== lastShabad.shabad_id
         ) {
+          nextShabadRequestedRef.current = lastShabad.shabad_id;
           onNeedNextShabad();
         }
       }
