@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 
 interface FullShabadDisplayProps {
   shabads: any[];
@@ -8,23 +8,13 @@ interface FullShabadDisplayProps {
 
 // Progressive search configuration
 const PHRASE_MATCH_THRESHOLD = 60; // High precision for first match
-const SEQUENTIAL_MATCH_THRESHOLD = 40; // High recall for sequential matches
-const PHRASE_LENGTHS = [2, 3, 4]; // Try phrases of 2-4 words
+const SEQUENTIAL_MATCH_THRESHOLD = 45; // High recall for sequential matches
+const PHRASE_LENGTHS = [4, 3, 2]; // Try phrases in order: 4-word, 3-word, then 2-word (prioritize longer phrases)
 const CONTEXT_WINDOW_SIZE = 2; // Current + next verse for sequential search
 
-// Utility to remove diacritics and normalize for comparison
-function normalizeGurmukhi(str: string): string {
-  return str
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // Remove common Unicode diacritics
-    .replace(/[\u0A3C\u0A3E-\u0A4C\u0A70\u0A71]/g, '') // Remove Gurmukhi diacritics
-    .toLowerCase();
-}
 
 // Simple similarity function (Levenshtein distance based percentage)
 function similarity(a: string, b: string): number {
-  a = normalizeGurmukhi(a);
-  b = normalizeGurmukhi(b);
   //console.log('[DEBUG] similarity input:', { a, b });
   if (a === b) return 1;
   if (!a.length || !b.length) return 0;
@@ -46,51 +36,75 @@ function similarity(a: string, b: string): number {
   return result;
 }
 
-// Create phrases of different lengths from text
+// Create phrases of different lengths from text (only the last N words)
 function createPhrases(text: string, lengths: number[]): string[] {
   const words = text.trim().split(/\s+/);
   const phrases: string[] = [];
   for (const length of lengths) {
-    for (let i = 0; i <= words.length - length; i++) {
-      const phrase = words.slice(i, i + length).join(' ');
+    // Only create the phrase ending at the last word
+    if (words.length >= length) {
+      const startIndex = words.length - length;
+      const phrase = words.slice(startIndex, words.length).join(' ');
       phrases.push(phrase);
     }
   }
   return phrases;
 }
 
-// Calculate contextual score considering word sequence and position
-function calculateContextualScore(phrase: string, line: string, positionWeight: number = 0.3): number {
+// Calculate sequence match score - checks if phrase words appear in order
+function calculateSequenceScore(phrase: string, text: string): number {
   const phraseWords = phrase.split(/\s+/);
-  const lineWords = line.split(/\s+/);
+  const textWords = text.split(/\s+/);
 
-  if (!phraseWords.length || !lineWords.length) {
+  if (!phraseWords.length || !textWords.length) {
     return 0.0;
   }
 
-  // Find the best matching position in the line
+  // Find the best matching position in the text
   let bestScore = 0.0;
-  for (let i = 0; i <= lineWords.length - phraseWords.length; i++) {
+  for (let i = 0; i <= textWords.length - phraseWords.length; i++) {
     // Check if phrase words appear in sequence
     let sequenceMatch = 0;
+    let matchedWords = 0;
     for (let j = 0; j < phraseWords.length; j++) {
-      if (i + j < lineWords.length) {
-        const wordSimilarity = similarity(phraseWords[j], lineWords[i + j]);
+      if (i + j < textWords.length) {
+        const wordSimilarity = similarity(phraseWords[j], textWords[i + j]);
         if (wordSimilarity > 0.7) { // Word-level threshold
           sequenceMatch += wordSimilarity;
+          matchedWords++;
         }
       }
     }
 
-    if (sequenceMatch > 0) {
-      // Calculate position weight (words at beginning get higher weight)
-      const positionScore = 1.0 - (i / lineWords.length) * positionWeight;
-      const currentScore = (sequenceMatch / phraseWords.length) * positionScore;
+    if (matchedWords > 0) {
+      // Average the sequence match score
+      const currentScore = sequenceMatch / phraseWords.length;
       bestScore = Math.max(bestScore, currentScore);
     }
   }
 
   return bestScore * 100; // Convert to percentage
+}
+
+// Calculate contextual score considering word sequence
+function calculateContextualScore(phrase: string, text: string): number {
+  return calculateSequenceScore(phrase, text);
+}
+
+// Calculate direct similarity with sequence matching priority
+// If sequence match exists, it's prioritized over simple Levenshtein similarity
+function calculateDirectScoreWithSequence(phrase: string, text: string): number {
+  // First check for sequence match
+  const sequenceScore = calculateSequenceScore(phrase, text);
+  
+  // Also calculate simple similarity
+  const simpleSimilarity = similarity(phrase, text) * 100;
+  
+  // Prioritize sequence match if it exists (is > 0), otherwise use simple similarity
+  if (sequenceScore > 0) {
+    return sequenceScore;
+  }
+  return simpleSimilarity;
 }
 
 // Progressive context-aware fuzzy search
@@ -99,7 +113,9 @@ function calculateContextualScore(phrase: string, line: string, positionWeight: 
 function progressiveFuzzySearch(
   query: string,
   lines: string[],
-  highlightedLineIndex: number | null = null
+  highlightedLineIndex: number | null = null,
+  shabadIndex: number | null = null,
+  lineToShabadMap: ((index: number) => number) | null = null
 ): { bestLineIndex: number; bestScore: number } | null {
   if (!query.trim() || !lines.length) {
     return null;
@@ -126,26 +142,62 @@ function progressiveFuzzySearch(
     threshold = SEQUENTIAL_MATCH_THRESHOLD;
     //console.log('[DEBUG] Sequential search:', { startIndex, endIndex, threshold });
   } else {
-    // Full shabad search
-    searchLines = lines;
-    searchIndices = Array.from({ length: lines.length }, (_, i) => i);
-    threshold = PHRASE_MATCH_THRESHOLD;
-    //console.log('[DEBUG] Full shabad search:', { threshold });
+    // Full shabad search (or filtered to specific shabad if shabadIndex is provided)
+    if (shabadIndex !== null && lineToShabadMap) {
+      // Filter to only lines from the specified shabad
+      const filteredLines: string[] = [];
+      const filteredIndices: number[] = [];
+      for (let i = 0; i < lines.length; i++) {
+        if (lineToShabadMap(i) === shabadIndex) {
+          filteredLines.push(lines[i]);
+          filteredIndices.push(i);
+        }
+      }
+      searchLines = filteredLines;
+      searchIndices = filteredIndices;
+      threshold = PHRASE_MATCH_THRESHOLD;
+      //console.log('[DEBUG] Filtered shabad search:', { shabadIndex, filteredCount: filteredLines.length, threshold });
+    } else {
+      // Full search across all shabads
+      searchLines = lines;
+      searchIndices = Array.from({ length: lines.length }, (_, i) => i);
+      threshold = PHRASE_MATCH_THRESHOLD;
+      //console.log('[DEBUG] Full shabad search:', { threshold });
+    }
   }
 
+  // Extract last word from query for exact match scoring
+  const queryWords = query.trim().split(/\s+/);
+  const lastWord = queryWords.length > 0 ? queryWords[queryWords.length - 1] : '';
+
+  // Helper function to check exact match of last word in a line
+  const getLastWordMatchScore = (line: string, lastWordToMatch: string): number => {
+    if (!lastWordToMatch) return 0;
+    const lineWords = line.trim().split(/\s+/);
+    // Check if last word exactly matches any word in the line
+    return lineWords.some(word => word === lastWordToMatch) ? 100 : 0;
+  };
+
   // Search through the determined context
+  // Prioritize longer phrases: check 4-word phrases first, then 3-word, then 2-word
   for (const phrase of phrases) {
     for (let i = 0; i < searchLines.length; i++) {
       const line = searchLines[i];
 
-      // Calculate contextual score
+      // Calculate contextual score (checks for sequential word matches)
       const contextualScore = calculateContextualScore(phrase, line);
 
-      // Also try direct similarity as fallback
-      const directScore = similarity(phrase, line) * 100;
+      // Calculate direct score with sequence matching priority
+      const directScore = calculateDirectScoreWithSequence(phrase, line);
 
-      // Use the better score
-      const score = Math.max(contextualScore, directScore);
+      // Use the better score (base score - 90% weight)
+      const baseScore = Math.max(contextualScore, directScore);
+
+      // Last word exact match score (10% weight)
+      const lastWordMatchScore = getLastWordMatchScore(line, lastWord);
+
+      // Combined weighted score: 90% base + 10% last word match
+      const score = (baseScore * 0.9) + (lastWordMatchScore * 0.1);
 
       if (score > bestScore) {
         bestScore = score;
@@ -159,29 +211,47 @@ function progressiveFuzzySearch(
   if (bestScore >= threshold) {
     return { bestLineIndex, bestScore };
   } else {
-    // If sequential search failed, try full shabad search as fallback
+    // If sequential search failed, try fallback search
     if (highlightedLineIndex !== null) {
-      //console.log('[DEBUG] Sequential search failed, trying full shabad search as fallback');
-      return progressiveFuzzySearch(query, lines, null);
+      // Fallback: search within current shabad only (if shabadIndex is provided)
+      if (shabadIndex !== null && lineToShabadMap) {
+        //console.log('[DEBUG] Sequential search failed, trying current shabad search as fallback');
+        return progressiveFuzzySearch(query, lines, null, shabadIndex, lineToShabadMap);
+      } else {
+        //console.log('[DEBUG] Sequential search failed, trying full shabad search as fallback');
+        return progressiveFuzzySearch(query, lines, null, null, lineToShabadMap);
+      }
     } else {
-      return bestScore > 0 ? { bestLineIndex, bestScore } : null;
+      return null;
     }
   }
 }
 
-const HIGHLIGHT_THRESHOLD = 0.6; // 60% - Back to original threshold
 
 const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcribedText, onNeedNextShabad }) => {
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [highlightedLineIndex, setHighlightedLineIndex] = useState<number | null>(null);
+  // Track candidate persistence: only switch if same candidate is best for 2 consecutive tokens
+  const candidatePersistenceRef = useRef<{ candidate: number | null; count: number }>({ candidate: null, count: 0 });
+  // Track which shabad we've already requested next shabad for
+  const nextShabadRequestedRef = useRef<number | null>(null);
+
+  // Reset persistence counter and next shabad request tracking when shabads change
+  useEffect(() => {
+    candidatePersistenceRef.current = { candidate: null, count: 0 };
+    nextShabadRequestedRef.current = null;
+  }, [shabads]);
 
   // Flatten all lines from all shabads
-  const allLines: { line: any; shabadIndex: number; lineIndex: number }[] = [];
-  shabads.forEach((shabad, sIdx) => {
-    (shabad.lines_highlighted || []).forEach((line: any, lIdx: number) => {
-      allLines.push({ line, shabadIndex: sIdx, lineIndex: lIdx });
+  const allLines = useMemo(() => {
+    const lines: { line: any; shabadIndex: number; lineIndex: number }[] = [];
+    shabads.forEach((shabad, sIdx) => {
+      (shabad.lines_highlighted || []).forEach((line: any, lIdx: number) => {
+        lines.push({ line, shabadIndex: sIdx, lineIndex: lIdx });
+      });
     });
-  });
+    return lines;
+  }, [shabads]);
 
   // Progressive search over all lines
   useEffect(() => {
@@ -189,23 +259,51 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
     const gurmukhiLines = allLines.map(({ line }) =>
       line.gurmukhi_original || (line.gurmukhi_highlighted ? line.gurmukhi_highlighted.replace(/<[^>]+>/g, '') : '') || ''
     );
-    const result = progressiveFuzzySearch(transcribedText, gurmukhiLines, highlightedLineIndex);
+    
+    // Extract current shabad index from highlighted line
+    const currentShabadIndex = highlightedLineIndex !== null ? allLines[highlightedLineIndex].shabadIndex : null;
+    
+    // Create mapping function from line index to shabad index
+    const lineToShabadMap = (index: number) => allLines[index].shabadIndex;
+    
+    const result = progressiveFuzzySearch(transcribedText, gurmukhiLines, highlightedLineIndex, currentShabadIndex, lineToShabadMap);
     if (result) {
       const newHighlightedIndex = result.bestLineIndex;
-      setHighlightedLineIndex(newHighlightedIndex);
-      // If at second last or last line of last shabad, trigger fetch for next shabad
-      const lastShabad = shabads[shabads.length - 1];
-      const lastShabadStartIdx = allLines.findIndex(l => l.shabadIndex === shabads.length - 1 && l.lineIndex === 0);
-      const lastShabadLines = (lastShabad?.lines_highlighted || []).length;
-      if (
-        (newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 2 ||
-          newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 1) &&
-        lastShabad.shabad_id
-      ) {
-        onNeedNextShabad();
+      
+      // Persistence logic: only switch if same candidate stays best for 2 consecutive tokens
+      if (candidatePersistenceRef.current.candidate === newHighlightedIndex) {
+        // Same candidate as before, increment count
+        candidatePersistenceRef.current.count += 1;
+      } else {
+        // Different candidate, reset counter
+        candidatePersistenceRef.current.candidate = newHighlightedIndex;
+        candidatePersistenceRef.current.count = 1;
+      }
+      
+      // Only update highlighted line if candidate has persisted for 2 consecutive tokens
+      if (candidatePersistenceRef.current.count >= 2) {
+        // Log score when highlight changes
+        if (highlightedLineIndex !== newHighlightedIndex) {
+          console.log('[HIGHLIGHT CHANGE] Line:', newHighlightedIndex, 'Score:', result.bestScore.toFixed(2));
+        }
+        setHighlightedLineIndex(newHighlightedIndex);
+        
+        // If at second last or last line of last shabad, trigger fetch for next shabad
+        const lastShabad = shabads[shabads.length - 1];
+        const lastShabadStartIdx = allLines.findIndex(l => l.shabadIndex === shabads.length - 1 && l.lineIndex === 0);
+        const lastShabadLines = (lastShabad?.lines_highlighted || []).length;
+        if (
+          (newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 2 ||
+            newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 1) &&
+          lastShabad.shabad_id &&
+          nextShabadRequestedRef.current !== lastShabad.shabad_id
+        ) {
+          nextShabadRequestedRef.current = lastShabad.shabad_id;
+          onNeedNextShabad();
+        }
       }
     }
-  }, [shabads, transcribedText]);
+  }, [shabads, transcribedText, allLines, highlightedLineIndex, onNeedNextShabad]);
 
   // Smooth scroll highlighted line into center
   useEffect(() => {

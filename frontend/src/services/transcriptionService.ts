@@ -1,7 +1,6 @@
 // Transcription service for REST API communication
 
-// Import BaniDB types from the service
-import { BaniDBSearchResult, banidbService } from './banidbService';
+// Transcription service for REST API communication
 
 export interface TranscriptionRequest {
   text: string;
@@ -13,7 +12,8 @@ export interface TranscriptionResponse {
   transcribed_text: string;
   confidence: number;
   sggs_match_found: boolean;
-  best_sggs_match: string | null;
+  shabad_id: number;
+  best_sggs_match: string;
   best_sggs_score: number | null;
   timestamp: number;
 }
@@ -30,7 +30,6 @@ export interface SearchResult {
 
 export interface FullTranscriptionResponse extends TranscriptionResponse {
   results: SearchResult[];
-  fallback_used: boolean;
 }
 
 class TranscriptionService {
@@ -54,7 +53,7 @@ class TranscriptionService {
     };
 
     try {
-      // Step 1: Get SGGS fuzzy match from backend
+      // Step 1: Get SGGS fuzzy match and shabad_id from backend
       const response = await fetch(`${this.baseUrl}/api/transcribe`, {
         method: 'POST',
         headers: {
@@ -69,21 +68,23 @@ class TranscriptionService {
 
       const backendData: TranscriptionResponse = await response.json();
 
-      // Step 2: If we have a good SGGS match, search BaniDB with it
+      // Step 2: Create results directly from backend shabad_id (no BaniDB search needed)
       let results: SearchResult[] = [];
-      let fallbackUsed = false;
 
-      if (backendData.sggs_match_found && backendData.best_sggs_match) {
-        console.log(`Using SGGS match: ${backendData.best_sggs_match}`);
-        const banidbResponse = await banidbService.searchFromSGGSLine(backendData.best_sggs_match);
-        results = banidbResponse.results.map(this.mapBaniDBResult);
-        fallbackUsed = banidbResponse.fallbackUsed;
+      if (backendData.sggs_match_found && backendData.shabad_id) {
+        console.log(`Using shabad_id directly: ${backendData.shabad_id}`);
+        // Create a result object with the shabad_id from backend
+        results = [{
+          gurmukhi_text: backendData.best_sggs_match,
+          english_translation: "", // Will be populated when full shabad is fetched
+          verse_id: 0, // Not needed since we have shabad_id
+          shabad_id: backendData.shabad_id,
+          source: "",
+          writer: "",
+          raag: ""
+        }];
       } else {
-        // Fallback: search BaniDB directly with transcribed text
-        console.log(`No good SGGS match, searching BaniDB directly with: ${text}`);
-        const directResults = await banidbService.searchFromSGGSLine(text);
-        results = directResults.results.map(this.mapBaniDBResult);
-        fallbackUsed = true;
+        console.log(`No good SGGS match found - no results`);
       }
 
       // If no results found, refresh the page
@@ -97,8 +98,7 @@ class TranscriptionService {
 
       return {
         ...backendData,
-        results,
-        fallback_used: fallbackUsed
+        results
       };
     } catch (error) {
       console.error('Transcription service error:', error);
@@ -106,17 +106,7 @@ class TranscriptionService {
     }
   }
 
-  private mapBaniDBResult(banidbResult: BaniDBSearchResult): SearchResult {
-    return {
-      gurmukhi_text: banidbResult.gurmukhi_text,
-      english_translation: banidbResult.english_translation,
-      verse_id: banidbResult.verse_id,
-      shabad_id: banidbResult.shabad_id,
-      source: banidbResult.source,
-      writer: banidbResult.writer,
-      raag: banidbResult.raag
-    };
-  }
+
 
 
 

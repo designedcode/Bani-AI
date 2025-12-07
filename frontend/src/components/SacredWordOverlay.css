@@ -1,0 +1,96 @@
+.sacred-word-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  opacity: 0;
+  transform: scale(0.95);
+  pointer-events: none;
+}
+
+.sacred-word-overlay.visible {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+.sacred-word-overlay.hidden {
+  opacity: 0;
+  transform: scale(0.95);
+  pointer-events: none;
+}
+
+.sacred-word-content {
+  text-align: center;
+  color: white;
+  animation: fadeInUp 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sacred-word-symbol {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+  color: #ffb347;
+  text-shadow: 0 0 20px rgba(255, 179, 71, 0.5);
+  animation: glow 2s ease-in-out infinite alternate;
+}
+
+.sacred-word-text {
+  font-size: 2.5rem;
+  font-weight: 600;
+  line-height: 1.4;
+  max-width: 80vw;
+  word-wrap: break-word;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+  font-family: 'Noto Sans Gurmukhi', sans-serif;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes glow {
+  from {
+    text-shadow: 0 0 20px rgba(255, 179, 71, 0.5);
+  }
+  to {
+    text-shadow: 0 0 30px rgba(255, 179, 71, 0.8);
+  }
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .sacred-word-symbol {
+    font-size: 3rem;
+  }
+  
+  .sacred-word-text {
+    font-size: 2rem;
+    max-width: 90vw;
+  }
+}
+
+@media (max-width: 480px) {
+  .sacred-word-symbol {
+    font-size: 2.5rem;
+  }
+  
+  .sacred-word-text {
+    font-size: 1.5rem;
+    max-width: 95vw;
+  }
+}

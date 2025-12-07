@@ -1,7 +1,7 @@
 // Direct BaniDB API service for frontend
 // Handles full shabad fetching and search without going through our backend
 
-import { stripGurmukhiMatras, getFirstLettersSearch } from './gurmukhiUtils';
+// Removed gurmukhiUtils import - no longer using fallback search methods
 
 export interface BaniDBShabadResponse {
   shabad_id: number;
@@ -103,9 +103,9 @@ class BaniDBService {
     }
   }
 
-  async searchFromSGGSLine(sggsLine: string): Promise<{ results: BaniDBSearchResult[], fallbackUsed: boolean }> {
+  async searchFromSGGSLine(sggsLine: string): Promise<BaniDBSearchResult[]> {
     if (!sggsLine) {
-      return { results: [], fallbackUsed: false };
+      return [];
     }
 
     // Process the SGGS line
@@ -115,35 +115,13 @@ class BaniDBService {
     }
     verse = verse.normalize('NFC');
 
-    console.log(`Original SGGS line for BaniDB search: '${verse}'`);
+    console.log(`BaniDB search with exact SGGS line: '${verse}'`);
 
-    // PRIMARY: Try direct search with searchtype=2 (exact line match)
-    console.log(`Trying searchtype=2 with exact SGGS line: '${verse}'`);
-    let results = await this.searchBaniDB(verse, "all", "2");
-
-    if (results.length > 0) {
-      console.log(`Found ${results.length} results with searchtype=2`);
-      return { results, fallbackUsed: false };
-    }
-
-    // FALLBACK 1: Try with stripped matras and searchtype=6 (exact match)
-    const strippedVerse = stripGurmukhiMatras(verse);
-    console.log(`No results with searchtype=2, trying searchtype=6 with stripped verse: '${strippedVerse}'`);
-    results = await this.searchBaniDB(strippedVerse, "all", "6");
-
-    if (results.length > 0) {
-      console.log(`Found ${results.length} results with searchtype=6`);
-      return { results, fallbackUsed: true };
-    }
-
-    // FALLBACK 2: Try first letter search with searchtype=1
-    console.log(`No results with searchtype=6, falling back to first letter search`);
-    const fallbackFirstLetters = getFirstLettersSearch(verse);
-    console.log(`Fallback first letters: '${fallbackFirstLetters}'`);
-
-    const fallbackResults = await this.searchBaniDB(fallbackFirstLetters, "all", "1");
-    console.log(`Found ${fallbackResults.length} results with searchtype=1`);
-    return { results: fallbackResults, fallbackUsed: true };
+    // Direct search with searchtype=2 (exact line match) - no fallbacks
+    const results = await this.searchBaniDB(verse, "all", "2");
+    console.log(`Found ${results.length} results with searchtype=2`);
+    
+    return results;
   }
 
   async getFullShabad(shabadId: number, verseId?: number): Promise<BaniDBShabadResponse> {

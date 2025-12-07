@@ -24,7 +24,13 @@
 - Core search and display features are implemented
 
 ## Known issues
-- Occasional mismatches in fuzzy search
+- Occasional mismatches in fuzzy search (improved with recent scoring changes)
 - Web Speech API support varies by browser
-- Real-time search in shabad keeps jumping due to the four word logic
-- Printing of excessive console logs for debugging
+- Real-time search stability improved with 2-token persistence (reduced jumping)
+- Some debug logging still present (highlight change logging added for monitoring)
+
+## Recent improvements (November 2025)
+- Enhanced fuzzy search scoring with sequence matching and last-word weighting
+- Improved line highlighting stability with candidate persistence (2 tokens)
+- Better phrase prioritization (longer phrases first)
+- Refined thresholds for better precision/recall balance

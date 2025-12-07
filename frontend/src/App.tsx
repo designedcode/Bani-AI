@@ -4,9 +4,11 @@ import FullShabadDisplay from './components/FullShabadDisplay';
 import LoadingOverlay from './components/LoadingOverlay';
 import StickyButtons from './components/StickyButtons';
 import MetadataPills from './components/MetadataPills';
+import SacredWordOverlay from './components/SacredWordOverlay';
 import { transcriptionService } from './services/transcriptionService';
 import { banidbService } from './services/banidbService';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
+
 
 
 
@@ -22,12 +24,13 @@ function App() {
   const shabadsBeingFetched = useRef<Set<number>>(new Set());
   const shabadsLoadedRef = useRef(false); // Track if shabads are loaded
   const transcriptionSentRef = useRef(false); // Track if we've already sent a transcription
-  const wordCountTriggeredRef = useRef(false); // Track if 5+ words have been reached
+  const wordCountTriggeredRef = useRef(false); // Track if 8+ words have been reached
   const [subtitleText, setSubtitleText] = useState('');
   const [showMatchedSubtitle, setShowMatchedSubtitle] = useState(false);
+  const [isFiltering, setIsFiltering] = useState(false);
   const MATCH_DISPLAY_DELAY = 1800; // ms
 
-  // Use the new speech recognition hook
+  // Use the new speech recognition hook - keep running even when shabads are loaded
   const {
     isListening,
     transcribedText,
@@ -37,8 +40,11 @@ function App() {
     volume,
     start: startSpeechRecognition,
     returnToLoadingOverlay,
-    resetTranscription
-  } = useSpeechRecognition();
+    resetTranscription,
+    sacredWordOverlay
+  } = useSpeechRecognition(shabads.length > 0);
+
+
 
   // Simple function to send transcription data via HTTP (no debouncing)
   const sendTranscription = useCallback(async (text: string, confidence: number) => {
@@ -80,7 +86,7 @@ function App() {
         if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
           shabadsBeingFetched.current.add(newShabadId);
           try {
-            const shabadData = await banidbService.getFullShabad(newShabadId, response.results[0].verse_id);
+            const shabadData = await banidbService.getFullShabad(newShabadId);
             setShabads(prev => [...prev, shabadData]);
           } catch (err) {
             console.error('Error fetching full shabad:', err);
@@ -116,16 +122,38 @@ function App() {
       return;
     }
 
-    // Check word count on COMBINED final + interim text
-    const combinedText = (transcribedText + ' ' + interimTranscript).trim();
-    const totalWordCount = combinedText.split(/\s+/).filter(word => word.length > 0).length;
-
-    // Send transcription as soon as we have 5+ words (final or interim), but only once
-    if (totalWordCount >= 5 && !wordCountTriggeredRef.current && !shabadsLoadedRef.current && !transcriptionSentRef.current) {
-      wordCountTriggeredRef.current = true; // Mark that we've triggered the 5+ word condition
-      sendTranscription(combinedText, 0.8); // Default confidence since we don't get it from the hook
+    // Don't process if currently filtering
+    if (isFiltering) {
+      return;
     }
-  }, [transcribedText, interimTranscript, sendTranscription, noSpeechCount]);
+
+    // Use pre-filtered text from speech recognition hook
+    const combinedText = (transcribedText + ' ' + interimTranscript).trim();
+    
+    if (!combinedText) {
+      return;
+    }
+
+    setIsFiltering(true);
+    
+    try {
+      // Count words on the already-filtered text from speech recognition
+      const wordCount = combinedText.split(/\s+/).filter(word => word.length > 0).length;
+
+      console.log('[App] Pre-filtered combined text:', combinedText);
+      console.log('[App] Word count:', wordCount);
+
+      // Send transcription only if text has 8+ words (and other conditions met)
+      if (wordCount >= 8 && !wordCountTriggeredRef.current && !shabadsLoadedRef.current && !transcriptionSentRef.current) {
+        wordCountTriggeredRef.current = true; // Mark that we've triggered the 8+ word condition
+        
+        console.log('[App] Triggering API call with pre-filtered text');
+        sendTranscription(combinedText, 0.8); // Send pre-filtered text to API
+      }
+    } finally {
+      setIsFiltering(false);
+    }
+  }, [transcribedText, interimTranscript, sendTranscription, noSpeechCount, isFiltering]);
 
   // Handle speech recognition errors
   useEffect(() => {
@@ -173,7 +201,7 @@ function App() {
     }
   }, [shabads]);
 
-  // Show live transcription as subtitle during loading
+  // Show live transcription as subtitle during loading (FILTERED)
   useEffect(() => {
     // Immediately clear subtitle if max no-speech errors reached
     if (noSpeechCount >= 3) {
@@ -182,6 +210,7 @@ function App() {
     }
     
     if (showLoader && !showMatchedSubtitle && !shabadsLoadedRef.current && noSpeechCount < 3) {
+      // Use pre-filtered text from speech recognition hook
       const subtitle = (transcribedText + ' ' + interimTranscript).trim();
       setSubtitleText(subtitle);
     }
@@ -214,7 +243,7 @@ function App() {
     wordCountTriggeredRef.current = false; // Reset word count trigger flag
   }, [resetTranscription]);
 
-  // Automatically start speech recognition on mount
+  // Automatically start speech recognition on mount - SpeechRecognitionManager handles all restarts internally
   useEffect(() => {
     startSpeechRecognition();
   }, [startSpeechRecognition]);
@@ -231,7 +260,7 @@ function App() {
   }, [resetTranscriptionState, returnToLoadingOverlay]);
 
   // Callback to fetch next shabad
-  const handleNeedNextShabad = async () => {
+  const handleNeedNextShabad = useCallback(async () => {
     const lastShabad = shabads[shabads.length - 1];
     const nextShabadId = lastShabad?.navigation?.next;
     console.log(`[PAGINATION] Attempting to fetch next shabad. Current: ${lastShabad?.shabad_id}, Next: ${nextShabadId}`);
@@ -257,7 +286,7 @@ function App() {
     } else {
       console.log(`[PAGINATION] Skipping fetch - nextShabadId: ${nextShabadId}, already exists: ${shabads.some(s => s.shabad_id === nextShabadId)}, being fetched: ${shabadsBeingFetched.current.has(nextShabadId)}`);
     }
-  };
+  }, [shabads]);
 
   return (
     <>
@@ -265,6 +294,10 @@ function App() {
         className={showLoader ? '' : 'fade-out'} 
         volume={volume} 
         subtitle={showLoader ? subtitleText : undefined}
+      />
+      <SacredWordOverlay
+        isVisible={sacredWordOverlay.isVisible}
+        sacredWord={sacredWordOverlay.sacredWord}
       />
       <div style={{ display: showLoader ? 'none' : 'block' }}>
         <div className="App">
@@ -307,6 +340,7 @@ function App() {
                 <FullShabadDisplay
                   shabads={shabads}
                   transcribedText={(() => {
+                    // Use pre-filtered text from speech recognition hook
                     const combined = (transcribedText + ' ' + interimTranscript).trim();
                     const words = combined.split(/\s+/);
                     const last4Words = words.slice(-4).join(' ');

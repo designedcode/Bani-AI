@@ -25,7 +25,7 @@ echo "✅ Prerequisites check passed"
 
 # Install Python dependencies
 echo "📦 Installing Python dependencies..."
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 
 # Install Node.js dependencies
 echo "📦 Installing Node.js dependencies..."

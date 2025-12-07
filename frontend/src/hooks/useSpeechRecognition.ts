@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { speechRecognitionManager } from '../services/speechRecognitionManager';
 import { SpeechState, SpeechRecognitionResult } from '../types/speechRecognition';
+import { useSacredWordDetection } from './useSacredWordDetection';
 
 interface UseSpeechRecognitionReturn {
   isListening: boolean;
@@ -14,9 +15,15 @@ interface UseSpeechRecognitionReturn {
   stop: () => void;
   returnToLoadingOverlay: () => void;
   resetTranscription: () => void;
+  setAutoRestart: (enabled: boolean) => void;
+  isAutoRestartEnabled: boolean;
+  sacredWordOverlay: {
+    isVisible: boolean;
+    sacredWord: string;
+  };
 }
 
-export function useSpeechRecognition(): UseSpeechRecognitionReturn {
+export function useSpeechRecognition(isDisplayingResults: boolean = false): UseSpeechRecognitionReturn {
   const [isListening, setIsListening] = useState(false);
   const [transcribedText, setTranscribedText] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
@@ -24,10 +31,62 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
   const [noSpeechCount, setNoSpeechCount] = useState(0);
   const [speechState, setSpeechState] = useState<SpeechState>(SpeechState.IDLE);
   const [volume, setVolume] = useState(0);
-  
-  const volumeUpdateRef = useRef<number | null>(null);
+  const [isAutoRestartEnabled, setIsAutoRestartEnabledState] = useState(true);
 
-  // Initialize speech recognition manager
+  const volumeUpdateRef = useRef<number | null>(null);
+  
+  // Use refs to track current state values for the callback
+  const transcribedTextRef = useRef('');
+  const interimTranscriptRef = useRef('');
+
+  // Initialize sacred word detection hook
+  const { detectInTranscript, overlayState } = useSacredWordDetection();
+  
+  // Create a stable ref for detectInTranscript to prevent recreating handleResult
+  const detectInTranscriptRef = useRef(detectInTranscript);
+  useEffect(() => {
+    detectInTranscriptRef.current = detectInTranscript;
+  }, [detectInTranscript]);
+
+  // Update refs when state changes
+  useEffect(() => {
+    transcribedTextRef.current = transcribedText;
+  }, [transcribedText]);
+
+  useEffect(() => {
+    interimTranscriptRef.current = interimTranscript;
+  }, [interimTranscript]);
+
+  // Create stable callback for result handling using refs to avoid recreating
+  const handleResult = useCallback((result: SpeechRecognitionResult) => {
+    if (result.isFinal) {
+      // For final results, only combine previous transcribed text with the final transcript
+      // Don't include interim transcript as it's already part of the final transcript
+      const combinedText = (transcribedTextRef.current + ' ' + result.transcript).trim();
+      const detection = detectInTranscriptRef.current(combinedText, 'general', isDisplayingResults);
+
+      console.log('[SpeechRecognition] Final result processed, filtered transcript:', detection.filteredTranscript);
+
+      setTranscribedText(detection.filteredTranscript);
+      setInterimTranscript('');
+    } else {
+      // Handle interim results separately
+      const combinedText = (transcribedTextRef.current + ' ' + result.transcript).trim();
+      const detection = detectInTranscriptRef.current(combinedText, 'general', isDisplayingResults);
+
+      const filteredInterim = detection.filteredTranscript.substring(transcribedTextRef.current.length).trim();
+      
+      setInterimTranscript(filteredInterim);
+    }
+  }, [isDisplayingResults]); // Only depend on isDisplayingResults, use ref for detectInTranscript
+
+  // Create a stable result handler ref that gets updated
+  const handleResultRef = useRef(handleResult);
+  useEffect(() => {
+    handleResultRef.current = handleResult;
+  }, [handleResult]);
+
+  // Initialize speech recognition manager - only run once on mount
   useEffect(() => {
     const initialized = speechRecognitionManager.initialize();
     if (!initialized) {
@@ -35,11 +94,14 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
       return;
     }
 
-    // Set up event listeners
+    // Enable auto-restart by default
+    speechRecognitionManager.setAutoRestart(true);
+
+    // Set up event listeners with stable handlers
     speechRecognitionManager.on('stateChange', (state) => {
       setSpeechState(state);
       setIsListening(state === SpeechState.LISTENING);
-      
+
       // Clear error when successfully listening
       if (state === SpeechState.LISTENING) {
         setError('');
@@ -47,12 +109,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     });
 
     speechRecognitionManager.on('result', (result: SpeechRecognitionResult) => {
-      if (result.isFinal) {
-        setTranscribedText(prev => prev + result.transcript);
-        setInterimTranscript(''); // Clear interim when we get final result
-      } else {
-        setInterimTranscript(result.transcript);
-      }
+      handleResultRef.current(result);
     });
 
     speechRecognitionManager.on('error', (errorMessage) => {
@@ -68,7 +125,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
       setTranscribedText('');
       setInterimTranscript('');
       setError('');
-      
+
       // Force a synchronous clear by using a timeout to ensure state updates
       setTimeout(() => {
         setTranscribedText('');
@@ -90,7 +147,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
       }
       speechRecognitionManager.cleanup();
     };
-  }, []);
+  }, []); // No dependencies to prevent re-initialization
 
   const start = useCallback(() => {
     speechRecognitionManager.start();
@@ -111,6 +168,25 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     setNoSpeechCount(0);
   }, []);
 
+  const setAutoRestart = useCallback((enabled: boolean) => {
+    speechRecognitionManager.setAutoRestart(enabled);
+    setIsAutoRestartEnabledState(enabled);
+  }, []);
+
+  // Update auto-restart state when speech recognition manager changes
+  useEffect(() => {
+    const checkAutoRestart = () => {
+      const enabled = speechRecognitionManager.isAutoRestartEnabled();
+      setIsAutoRestartEnabledState(enabled);
+    };
+    
+    // Check initially and set up periodic check
+    checkAutoRestart();
+    const interval = setInterval(checkAutoRestart, 1000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
   return {
     isListening,
     transcribedText,
@@ -122,6 +198,9 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     start,
     stop,
     returnToLoadingOverlay,
-    resetTranscription
+    resetTranscription,
+    setAutoRestart,
+    isAutoRestartEnabled,
+    sacredWordOverlay: overlayState
   };
 }

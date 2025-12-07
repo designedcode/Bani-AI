@@ -4,10 +4,12 @@ from pydantic import BaseModel
 from typing import Optional
 import logging
 import os
-from pathlib import Path
 import time
 import unicodedata
-from rapidfuzz import fuzz
+import sqlite3
+import aiosqlite
+from rapidfuzz import fuzz, process
+from functools import lru_cache
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -23,7 +25,8 @@ class TranscriptionResponse(BaseModel):
     transcribed_text: str
     confidence: float
     sggs_match_found: bool
-    best_sggs_match: Optional[str]
+    shabad_id: int
+    best_sggs_match: str
     best_sggs_score: Optional[float]
     timestamp: float
 
@@ -38,167 +41,168 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Removed BaniDB API configuration - now handled by frontend
+# --- Database Fuzzy Search Setup ---
+from pathlib import Path
 
-# --- SGGSO.txt Fuzzy Search Setup ---
-from functools import lru_cache
-import json
+DATABASE_PATH = Path(__file__).parent / "uploads" / "shabads_verses_SGGS.db"
+VERSES_DATA = []  # List of (ShabadID, GurmukhiUni) tuples
+DATABASE_LOADED = False
+FUZZY_THRESHOLD = float(os.getenv("FUZZY_MATCH_THRESHOLD", "60"))
 
-SGGS_PATH = Path(__file__).parent / "uploads" / "SGGSO.txt"
-INVERTED_INDEX_PATH = Path(__file__).parent / "uploads" / "sggso_inverted_index.json"
-SGGS_LINES = []
-INVERTED_INDEX = {}
-SGGS_LOADED = False
-INVERTED_INDEX_LOADED = False
-FUZZY_THRESHOLD = float(os.getenv("FUZZY_MATCH_THRESHOLD", "70"))
-
-# Async loading of SGGSO.txt
-async def load_sggs_data():
-    """Asynchronously load SGGSO.txt data"""
-    global SGGS_LINES, SGGS_LOADED
+# Async loading of database verses
+async def load_database_verses():
+    """Asynchronously load all verses from SQLite database"""
+    global VERSES_DATA, DATABASE_LOADED
     
-    if SGGS_PATH.exists():
+    if DATABASE_PATH.exists():
         try:
-            with open(SGGS_PATH, 'r', encoding="utf-8") as f:
-                SGGS_LINES = [unicodedata.normalize('NFC', line.strip()) for line in f if line.strip()]
-            SGGS_LOADED = True
-            logger.info(f"Loaded {len(SGGS_LINES)} lines from SGGSO.txt for fuzzy search.")
+            async with aiosqlite.connect(DATABASE_PATH) as db:
+                async with db.execute("SELECT ShabadID, GurmukhiUni FROM Verse") as cursor:
+                    rows = await cursor.fetchall()
+                    VERSES_DATA = [(row[0], unicodedata.normalize('NFC', row[1])) for row in rows]
+            
+            DATABASE_LOADED = True
+            logger.info(f"Loaded {len(VERSES_DATA)} verses from database for fuzzy search.")
         except Exception as e:
-            logger.error(f"Error loading SGGSO.txt: {e}")
-            SGGS_LOADED = False
+            logger.error(f"Error loading database: {e}")
+            DATABASE_LOADED = False
     else:
-        logger.warning(f"SGGSO.txt not found at {SGGS_PATH}. Fuzzy search will be disabled.")
+        logger.warning(f"Database not found at {DATABASE_PATH}. Fuzzy search will be disabled.")
 
-# Async loading of inverted index
-async def load_inverted_index():
-    """Asynchronously load inverted index data"""
-    global INVERTED_INDEX, INVERTED_INDEX_LOADED
-    
-    if INVERTED_INDEX_PATH.exists():
-        try:
-            with open(INVERTED_INDEX_PATH, 'r', encoding="utf-8") as f:
-                INVERTED_INDEX = json.load(f)
-            INVERTED_INDEX_LOADED = True
-            logger.info(f"Loaded inverted index with {len(INVERTED_INDEX)} words for fuzzy search optimization.")
-        except Exception as e:
-            logger.error(f"Error loading inverted index: {e}")
-            INVERTED_INDEX_LOADED = False
-    else:
-        logger.warning(f"Inverted index not found at {INVERTED_INDEX_PATH}. Using fallback fuzzy search.")
 
-# rapidfuzz already imported above
-
-@lru_cache(maxsize=500)
-def get_candidate_lines_from_index(query: str) -> set:
-    """Get candidate line numbers from inverted index based on query words"""
-    if not INVERTED_INDEX_LOADED or not query.strip():
-        return set()
-    
-    # Normalize and split query into words
-    normalized_query = unicodedata.normalize('NFC', query.strip())
-    words = normalized_query.split()
-    
-    if not words:
-        return set()
-    
-    candidate_lines = set()
-    words_found = 0
-    
-    # For each word in query, find matching lines in inverted index
-    for word in words:
-        if word in INVERTED_INDEX:
-            candidate_lines.update(INVERTED_INDEX[word])
-            words_found += 1
-    
-    logger.info(f"Inverted index: Found {words_found}/{len(words)} words, {len(candidate_lines)} candidate lines")
-    return candidate_lines
-
-def weighted_fuzzy_score(query: str, line: str) -> float:
-    """Calculate weighted fuzzy score using multiple methods
-    Weights: 0.4 * partial_ratio + 0.3 * token_set_ratio + 0.3 * ratio
-    """
-    partial = fuzz.partial_ratio(query, line)
-    token_set = fuzz.token_set_ratio(query, line)
-    ratio = fuzz.ratio(query, line)
-    
-    weighted_score = 0.4 * partial + 0.3 * token_set + 0.3 * ratio
-    return weighted_score
 
 @lru_cache(maxsize=1000)
-def fuzzy_search_sggs(query: str, threshold: float = FUZZY_THRESHOLD):
-    """Two-stage fuzzy search: inverted index filtering + weighted fuzzy matching"""
-    print(f"DEBUG: SGGS_LOADED={SGGS_LOADED}, INVERTED_INDEX_LOADED={INVERTED_INDEX_LOADED}, query='{query}'")
-    if not SGGS_LOADED or not query.strip():
-        print("DEBUG: Not loaded or empty query")
-        return []
+def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
+    """Fuzzy search with sliding windows using database verses - BATCH OPTIMIZED"""
+    logger.info(f"DEBUG SEARCH: Starting search for query='{query}', threshold={threshold}")
     
-    # Stage 1: Try inverted index approach (PRIMARY)
-    if INVERTED_INDEX_LOADED:
-        candidate_line_numbers = get_candidate_lines_from_index(query)
+    if not DATABASE_LOADED or not query.strip():
+        logger.info("DEBUG SEARCH: Database not loaded or empty query")
+        return None, None, None
+    
+    normalized_query = unicodedata.normalize('NFC', query.strip())
+    
+    # Step 1: Batch process all verses using rapidfuzz.process for optimal performance
+    logger.info(f"DEBUG SEARCH: Step 1 - Batch scoring all {len(VERSES_DATA)} verses with rapidfuzz.process")
+    
+    # Extract just the verse texts for batch processing
+    verse_texts = [verse_text for shabad_id, verse_text in VERSES_DATA]
+    
+    # Use rapidfuzz.process.extract for batch processing - much faster than individual fuzz.ratio calls
+    # This uses optimized C++ implementation and can utilize multiple cores
+    batch_results = process.extract(
+        normalized_query, 
+        verse_texts, 
+        scorer=fuzz.ratio,
+        limit=len(verse_texts),  # Get all results
+        score_cutoff=0  # No cutoff, we'll filter later
+    )
+    
+    # Convert batch results back to our format with original indices and shabad_ids
+    all_scores = []
+    for verse_text, score, original_index in batch_results:
+        shabad_id = VERSES_DATA[original_index][0]  # Get shabad_id from original data
+        all_scores.append((original_index, shabad_id, verse_text, score))
+    
+    # Results from process.extract are already sorted by score (descending), so just take top 3
+    top_3 = all_scores[:3]
+    
+    logger.info("DEBUG SEARCH: Step 2 - Top 3 results by ratio score:")
+    for rank, (verse_idx, shabad_id, verse_text, score) in enumerate(top_3, 1):
+        logger.info(f"DEBUG SEARCH:   {rank}. Verse {verse_idx} (ShabadID: {shabad_id}): {score:.2f} | '{verse_text}'")
+    
+    # Step 3: Generate sliding windows for each top verse
+    logger.info("DEBUG SEARCH: Step 3 - Generating sliding windows for top 3 verses")
+    seen_spans = set()
+    window_candidates = []
+    
+    for rank, (verse_idx, shabad_id, verse_text, original_score) in enumerate(top_3, 1):
+        logger.info(f"DEBUG SEARCH: Processing rank {rank} verse {verse_idx} (score: {original_score:.2f})")
         
-        if candidate_line_numbers:
-            print(f"DEBUG: Using inverted index with {len(candidate_line_numbers)} candidates")
+        # Generate all window types for this verse
+        windows = []
+        
+        # Single-verse: the top verse
+        windows.append((verse_idx, verse_idx, "single"))
+        
+        # Double-verse forward: (i, i+1)
+        if verse_idx + 1 < len(VERSES_DATA):
+            windows.append((verse_idx, verse_idx + 1, "double_fwd"))
+        
+        # Double-verse backward: (i-1, i)
+        if verse_idx - 1 >= 0:
+            windows.append((verse_idx - 1, verse_idx, "double_bwd"))
+        
+        # Triple centered: (i-1, i, i+1)
+        if verse_idx - 1 >= 0 and verse_idx + 1 < len(VERSES_DATA):
+            windows.append((verse_idx - 1, verse_idx + 1, "triple_center"))
+        
+        # Triple forward: (i, i+1, i+2)
+        if verse_idx + 2 < len(VERSES_DATA):
+            windows.append((verse_idx, verse_idx + 2, "triple_fwd"))
+        
+        # Triple backward: (i-2, i-1, i)
+        if verse_idx - 2 >= 0:
+            windows.append((verse_idx - 2, verse_idx, "triple_bwd"))
+        
+        # logger.info(f"DEBUG SEARCH:   Generated {len(windows)} windows for verse {verse_idx}")
+        
+        # Score each window and avoid duplicates
+        for start_idx, end_idx, window_type in windows:
+            span_key = (start_idx, end_idx)
             
-            # Convert line numbers to actual lines (1-indexed to 0-indexed)
-            candidate_lines = []
-            for line_num in candidate_line_numbers:
-                if 1 <= line_num <= len(SGGS_LINES):
-                    candidate_lines.append(SGGS_LINES[line_num - 1])
-            
-            print(f"DEBUG: Processing {len(candidate_lines)} candidate lines with weighted scoring")
-            
-            # Weighted fuzzy search on candidates only
-            best_score = -1
-            best_line = None
-            
-            for line in candidate_lines:
-                score = weighted_fuzzy_score(query, line)
-                if score >= 95:  # Early termination for excellent matches
-                    print(f"DEBUG: Early termination! Weighted Score={score:.2f}, Line='{line}'")
-                    return [(line, score)]
-                if score > best_score:
-                    best_score = score
-                    best_line = line
-            
-            # Return best candidate match if above threshold
-            if best_score >= threshold:
-                print(f"DEBUG: Best candidate weighted score={best_score:.2f}, Line='{best_line}'")
-                return [(best_line, best_score)]
-            elif best_score >= 55:  # Still return decent matches
-                print(f"DEBUG: Decent candidate weighted score={best_score:.2f}, Line='{best_line}'")
-                return [(best_line, best_score)]
+            if span_key not in seen_spans:
+                seen_spans.add(span_key)
+                
+                # Create span text
+                if start_idx == end_idx:
+                    span_text = VERSES_DATA[start_idx][1]
+                    span_shabad_id = VERSES_DATA[start_idx][0]
+                else:
+                    span_verses = [VERSES_DATA[i][1] for i in range(start_idx, end_idx + 1)]
+                    span_text = " ".join(span_verses)
+                    # Use the ShabadID of the original matching verse
+                    span_shabad_id = shabad_id
+                
+                # Score the span using weighted scoring: 0.3*ratio + 0.4*partial_ratio + 0.3*token_set_ratio
+                ratio_score = fuzz.ratio(normalized_query, span_text)
+                partial_ratio_score = fuzz.partial_ratio(normalized_query, span_text)
+                token_set_score = fuzz.token_set_ratio(normalized_query, span_text)
+                span_score = 0.3 * ratio_score + 0.4 * partial_ratio_score + 0.3 * token_set_score
+                
+                # Store the original verse that generated this window
+                original_verse = verse_text  # The verse from top 3 that generated this window
+                
+                window_candidates.append((original_verse, span_shabad_id, span_score, window_type, start_idx, end_idx, verse_idx))
+                
+               # logger.info(f"DEBUG SEARCH:     {window_type} ({start_idx}-{end_idx}): {span_score:.2f} (ratio: {ratio_score:.1f}, partial: {partial_ratio_score:.1f}, token_set: {token_set_score:.1f}) | '{span_text[:60]}...'")
+            else:
+                logger.info(f"DEBUG SEARCH:     {window_type} ({start_idx}-{end_idx}): DUPLICATE - skipped")
     
-    # Stage 2: Fallback to full-scan approach (FALLBACK)
-    print("DEBUG: Using fallback full-scan approach with weighted scoring")
-    best_score = -1
-    best_line = None
+    # Step 4: Find the highest scoring window
+    if not window_candidates:
+        logger.info("DEBUG SEARCH: No window candidates generated")
+        return None, None, None
     
-    for line in SGGS_LINES:
-        score = weighted_fuzzy_score(query, line)
-        if score >= 95:  # Early termination for excellent matches
-            print(f"DEBUG: Fallback early termination! Weighted Score={score:.2f}, Line='{line}'")
-            return [(line, score)]
-        if score > best_score:
-            best_score = score
-            best_line = line
+    window_candidates.sort(key=lambda x: x[2], reverse=True)
+    best_verse, best_shabad_id, best_score, best_type, best_start, best_end, original_verse_idx = window_candidates[0]
     
-    # Return best fallback match
-    print(f"DEBUG: Fallback best weighted score={best_score:.2f}, Best line='{best_line}'")
+    logger.info("DEBUG SEARCH: Step 4 - Final window results (top 5):")
+    for i, (verse_text, shabad_id, score, window_type, start_idx, end_idx, orig_idx) in enumerate(window_candidates[:5], 1):
+        logger.info(f"DEBUG SEARCH:   {i}. {window_type} ({start_idx}-{end_idx}) from original verse {orig_idx}: {score:.2f} , (ShabadID: {shabad_id}) | '{verse_text[:60]}...'")
+    
+    logger.info(f"DEBUG SEARCH: FINAL RESULT - Best window: {best_type} ({best_start}-{best_end}) with score {best_score:.2f} , Returning ShabadID {best_shabad_id} with verse: '{best_verse}'")
+
+    # Return the best result if above threshold
     if best_score >= threshold:
-        return [(best_line, best_score)]
-    elif best_score >= 55:  # Still return decent matches
-        return [(best_line, best_score)]
+        return best_verse, best_shabad_id, best_score
+    # elif best_score >= 55:  # I want to be more strict about the threshold of 60, so we are not returning any matches below 60
+      #  return best_verse, best_shabad_id, best_score
     else:
-        print("DEBUG: No matches found above threshold")
-        return []
-
-# Removed session management - not needed for simplified backend
-
-# Removed matra stripping functions - now handled by frontend
+        logger.info("DEBUG SEARCH: No matches found above threshold")
+        return None, None, None
 
 
-
-# Removed cache cleanup - no longer needed since BaniDB calls moved to frontend
 
 @app.get("/")
 async def root():
@@ -210,27 +214,30 @@ async def health_check():
 
 @app.post("/api/transcribe")
 async def transcribe_and_search(request: TranscriptionRequest) -> TranscriptionResponse:
-    """Process transcription and return SGGS fuzzy search results"""
+    """Process transcription and return database fuzzy search results"""
     transcribed_text = request.text
     confidence = request.confidence
     
     logger.info(f"Received transcription: {transcribed_text} (confidence: {confidence})")
 
-    # Fuzzy search SGGS.txt
-    fuzzy_matches = fuzzy_search_sggs(transcribed_text, FUZZY_THRESHOLD)
+    # Fuzzy search database
+    best_verse, best_shabad_id, best_score = fuzzy_search_database(transcribed_text, FUZZY_THRESHOLD)
     logger.info(f"Fuzzy search threshold: {FUZZY_THRESHOLD}")
+    
     sggs_match_found = False
-    best_sggs_match = None
+    shabad_id = 0
+    best_sggs_match = ""
     best_sggs_score = None
     
-    if fuzzy_matches:
-        matched_line, score = fuzzy_matches[0]
-        best_sggs_match = matched_line
-        best_sggs_score = score
-        logger.info(f"Best fuzzy match: Score={score}, Line='{matched_line}'")
-        logger.info(f"Transcription: '{transcribed_text}' | Best SGGS line: '{matched_line}'")
+    if best_verse and best_shabad_id and best_score:
+        shabad_id = best_shabad_id
+        best_sggs_match = best_verse
+        best_sggs_score = best_score
+        logger.info(f"Best fuzzy match: Score={best_score:.2f}, ShabadID={best_shabad_id}")
+        logger.info(f"Verse: '{best_verse}'")
+        logger.info(f"Transcription: '{transcribed_text}'")
         
-        if score >= FUZZY_THRESHOLD:
+        if best_score >= FUZZY_THRESHOLD:
             sggs_match_found = True
         else:
             logger.info(f"Best match below threshold ({FUZZY_THRESHOLD}). No match used.")
@@ -241,6 +248,7 @@ async def transcribe_and_search(request: TranscriptionRequest) -> TranscriptionR
         transcribed_text=transcribed_text,
         confidence=confidence,
         sggs_match_found=sggs_match_found,
+        shabad_id=shabad_id,
         best_sggs_match=best_sggs_match,
         best_sggs_score=best_sggs_score,
         timestamp=time.time()
@@ -248,35 +256,31 @@ async def transcribe_and_search(request: TranscriptionRequest) -> TranscriptionR
 
 
 
-# Removed BaniDB sources endpoint - now handled by frontend
-
-# Removed matra stripping test endpoint - functionality moved to frontend
-
-@app.get("/api/test-inverted-index")
-async def test_inverted_index_endpoint(query: str):
-    """Test endpoint to check inverted index functionality"""
-    candidate_lines = get_candidate_lines_from_index(query) if INVERTED_INDEX_LOADED else set()
-    fuzzy_results = fuzzy_search_sggs(query)
+@app.get("/api/test-database-search")
+async def test_database_search_endpoint(query: str):
+    """Test endpoint to check database fuzzy search functionality"""
+    best_verse, best_shabad_id, best_score = fuzzy_search_database(query)
     
     return {
         "query": query,
-        "inverted_index_loaded": INVERTED_INDEX_LOADED,
-        "sggs_loaded": SGGS_LOADED,
-        "total_words_in_index": len(INVERTED_INDEX) if INVERTED_INDEX_LOADED else 0,
-        "candidate_line_count": len(candidate_lines),
-        "candidate_lines_sample": list(candidate_lines)[:10] if candidate_lines else [],
-        "fuzzy_results": fuzzy_results,
-        "total_sggs_lines": len(SGGS_LINES)
+        "database_loaded": DATABASE_LOADED,
+        "total_verses": len(VERSES_DATA),
+        "best_match": {
+            "verse": best_verse,
+            "shabad_id": best_shabad_id,
+            "score": best_score
+        } if best_verse else None,
+        "configuration": {
+            "fuzzy_threshold": FUZZY_THRESHOLD,
+            "weighted_scoring": "0.3*ratio + 0.4*partial_ratio + 0.3*token_set_ratio"
+        }
     }
-
-
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize async tasks on startup"""
-    # Load SGGS data and inverted index asynchronously
-    await load_sggs_data()
-    await load_inverted_index()
+    # Load database verses asynchronously
+    await load_database_verses()
 
 if __name__ == "__main__":
     import uvicorn
