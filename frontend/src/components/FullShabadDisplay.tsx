@@ -8,7 +8,7 @@ interface FullShabadDisplayProps {
 
 // Progressive search configuration
 const PHRASE_MATCH_THRESHOLD = 60; // High precision for first match
-const SEQUENTIAL_MATCH_THRESHOLD = 45; // High recall for sequential matches
+const SEQUENTIAL_MATCH_THRESHOLD = 55; // High recall for sequential matches
 const PHRASE_LENGTHS = [4, 3, 2]; // Try phrases in order: 4-word, 3-word, then 2-word (prioritize longer phrases)
 const CONTEXT_WINDOW_SIZE = 2; // Current + next verse for sequential search
 
@@ -270,6 +270,8 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
     if (result) {
       const newHighlightedIndex = result.bestLineIndex;
       
+      // Persistence logic commented out - allowing immediate updates
+      /*
       // Persistence logic: only switch if same candidate stays best for 2 consecutive tokens
       if (candidatePersistenceRef.current.candidate === newHighlightedIndex) {
         // Same candidate as before, increment count
@@ -281,7 +283,8 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
       }
       
       // Only update highlighted line if candidate has persisted for 2 consecutive tokens
-      if (candidatePersistenceRef.current.count >= 2) {
+      if (candidatePersistenceRef.current.count >= 1) {
+      */
         // Log score when highlight changes
         if (highlightedLineIndex !== newHighlightedIndex) {
           console.log('[HIGHLIGHT CHANGE] Line:', newHighlightedIndex, 'Score:', result.bestScore.toFixed(2));
@@ -301,7 +304,9 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
           nextShabadRequestedRef.current = lastShabad.shabad_id;
           onNeedNextShabad();
         }
+      /*
       }
+      */
     }
   }, [shabads, transcribedText, allLines, highlightedLineIndex, onNeedNextShabad]);
 
