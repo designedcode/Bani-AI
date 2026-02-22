@@ -1,0 +1,109 @@
+.mode-selection-container {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: #0a0a0f;
+}
+
+.mode-panel {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+  padding: 2rem;
+}
+
+.mode-content {
+  text-align: center;
+  z-index: 2;
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.mode-panel:hover {
+  flex: 1.2;
+}
+
+.mode-panel:hover .mode-content {
+  transform: scale(1.05);
+}
+
+/* Paath Mode specific styles */
+.paath-mode {
+  background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.paath-mode:hover {
+  background: linear-gradient(135deg, #16162a 0%, #252545 100%);
+}
+
+/* Kirtan Mode specific styles */
+.kirtan-mode {
+  background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+}
+
+.kirtan-mode:hover {
+  background: linear-gradient(135deg, #161b22 0%, #21262d 100%);
+}
+
+.mode-icon {
+  font-size: 4rem;
+  margin-bottom: 2rem;
+  display: block;
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.2));
+  transition: filter 0.3s ease;
+}
+
+.mode-panel:hover .mode-icon {
+  filter: drop-shadow(0 0 15px rgba(255, 255, 255, 0.4));
+}
+
+.mode-title {
+  font-size: 3.5rem;
+  font-weight: 700;
+  color: white;
+  margin-bottom: 1rem;
+  letter-spacing: -0.02em;
+}
+
+.mode-description {
+  font-size: 1.2rem;
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 400;
+}
+
+/* Separator line logic */
+.paath-mode::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  transition: height 0.6s ease;
+}
+
+.mode-selection-container:hover .paath-mode::after {
+  height: 40%;
+}
+
+@media (max-width: 768px) {
+  .mode-selection-container {
+    flex-direction: column;
+  }
+  
+  .mode-title {
+    font-size: 2.5rem;
+  }
+  
+  .mode-icon {
+    font-size: 3rem;
+  }
+}
