@@ -17,7 +17,7 @@ interface BaniCoreProps {
 function BaniCore({ mode }: BaniCoreProps) {
     const navigate = useNavigate();
     const [shabads, setShabads] = useState<any[]>([]);
-    const [searchTriggered] = useState(false);
+    const searchTriggered = false;
     const [lastSggsMatchFound, setLastSggsMatchFound] = useState<boolean | null>(null);
     const [lastBestSggsMatch, setLastBestSggsMatch] = useState<string | null>(null);
     const [showLoader, setShowLoader] = useState(true);

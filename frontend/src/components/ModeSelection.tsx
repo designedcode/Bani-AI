@@ -7,27 +7,29 @@ const ModeSelection: React.FC = () => {
 
     return (
         <div className="mode-selection-container">
-            <div
+            <button
                 className="mode-panel paath-mode"
                 onClick={() => navigate('/paath')}
+                aria-label="Enter Paath Mode"
             >
                 <div className="mode-content">
                     <div className="mode-icon">📿</div>
                     <h2 className="mode-title">Paath Mode</h2>
                     <p className="mode-description">For reading and reciting Gurbani</p>
                 </div>
-            </div>
+            </button>
 
-            <div
+            <button
                 className="mode-panel kirtan-mode"
                 onClick={() => navigate('/kirtan')}
+                aria-label="Enter Kirtan Mode"
             >
                 <div className="mode-content">
                     <div className="mode-icon">🎵</div>
                     <h2 className="mode-title">Kirtan Mode</h2>
                     <p className="mode-description">For singing and musical recitation</p>
                 </div>
-            </div>
+            </button>
         </div>
     );
 };
