@@ -28,13 +28,13 @@ interface LoadingOverlayProps {
   subtitle?: React.ReactNode;
 }
 
-const LoadingOverlay: React.FC<LoadingOverlayProps> = ({ 
-  className = '', 
-  volume = 0, 
-  children, 
+const LoadingOverlay: React.FC<LoadingOverlayProps> = ({
+  className = '',
+  volume = 0,
+  children,
   subtitle
 }) => {
-  // Sensitive and less smooth (range: 1.0 to 2.0)
+  // Volume-based scaling (range: 1.0 to 2.0)
   const adjustedVolume = Math.pow(Math.min(volume, 1), 0.5);
   const scale = 1 + adjustedVolume * 1.0;
 
