@@ -34,14 +34,14 @@ export function useSpeechRecognition(isDisplayingResults: boolean = false): UseS
   const [isAutoRestartEnabled, setIsAutoRestartEnabledState] = useState(true);
 
   const volumeUpdateRef = useRef<number | null>(null);
-  
+
   // Use refs to track current state values for the callback
   const transcribedTextRef = useRef('');
   const interimTranscriptRef = useRef('');
 
   // Initialize sacred word detection hook
   const { detectInTranscript, overlayState } = useSacredWordDetection();
-  
+
   // Create a stable ref for detectInTranscript to prevent recreating handleResult
   const detectInTranscriptRef = useRef(detectInTranscript);
   useEffect(() => {
@@ -75,7 +75,7 @@ export function useSpeechRecognition(isDisplayingResults: boolean = false): UseS
       const detection = detectInTranscriptRef.current(combinedText, 'general', isDisplayingResults);
 
       const filteredInterim = detection.filteredTranscript.substring(transcribedTextRef.current.length).trim();
-      
+
       setInterimTranscript(filteredInterim);
     }
   }, [isDisplayingResults]); // Only depend on isDisplayingResults, use ref for detectInTranscript
@@ -135,6 +135,8 @@ export function useSpeechRecognition(isDisplayingResults: boolean = false): UseS
 
     // Start volume monitoring
     const updateVolume = () => {
+      // getCurrentVolume will return 0 if not initialized, but ensureAudioDetectionInitialized 
+      // is called on start/return to ensure it eventually kicks in
       const currentVolume = speechRecognitionManager.getCurrentVolume();
       setVolume(currentVolume);
       volumeUpdateRef.current = requestAnimationFrame(updateVolume);
@@ -179,11 +181,11 @@ export function useSpeechRecognition(isDisplayingResults: boolean = false): UseS
       const enabled = speechRecognitionManager.isAutoRestartEnabled();
       setIsAutoRestartEnabledState(enabled);
     };
-    
+
     // Check initially and set up periodic check
     checkAutoRestart();
     const interval = setInterval(checkAutoRestart, 1000);
-    
+
     return () => clearInterval(interval);
   }, []);
 
