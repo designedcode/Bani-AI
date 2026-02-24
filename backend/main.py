@@ -73,7 +73,7 @@ async def load_database_verses():
 
 @lru_cache(maxsize=1000)
 def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
-    """Fuzzy search with sliding windows using database verses - BATCH OPTIMIZED"""
+    """Fuzzy search with sliding windows using database verses - OPTIMIZED FOR SPEED"""
     logger.info(f"DEBUG SEARCH: Starting search for query='{query}', threshold={threshold}")
     
     if not DATABASE_LOADED or not query.strip():
@@ -82,20 +82,19 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
     
     normalized_query = unicodedata.normalize('NFC', query.strip())
     
-    # Step 1: Batch process all verses using rapidfuzz.process for optimal performance
-    logger.info(f"DEBUG SEARCH: Step 1 - Batch scoring all {len(VERSES_DATA)} verses with rapidfuzz.process")
+    # Step 1: Batch process verses - reduced limit for faster performance
+    logger.info(f"DEBUG SEARCH: Step 1 - Batch scoring verses with rapidfuzz.process")
     
     # Extract just the verse texts for batch processing
     verse_texts = [verse_text for shabad_id, verse_text in VERSES_DATA]
     
-    # Use rapidfuzz.process.extract for batch processing - much faster than individual fuzz.ratio calls
-    # This uses optimized C++ implementation and can utilize multiple cores
+    # Reduce limit from 20 to 10 for faster processing - we only use top 3 anyway
     batch_results = process.extract(
         normalized_query, 
         verse_texts, 
         scorer=fuzz.ratio,
-        limit=len(verse_texts),  # Get all results
-        score_cutoff=0  # No cutoff, we'll filter later
+        limit=10,  # Reduced from 20
+        score_cutoff=FUZZY_THRESHOLD - 10  # Apply early cutoff
     )
     
     # Convert batch results back to our format with original indices and shabad_ids
@@ -119,33 +118,28 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
     for rank, (verse_idx, shabad_id, verse_text, original_score) in enumerate(top_3, 1):
         logger.info(f"DEBUG SEARCH: Processing rank {rank} verse {verse_idx} (score: {original_score:.2f})")
         
-        # Generate all window types for this verse
-        windows = []
-        
-        # Single-verse: the top verse
-        windows.append((verse_idx, verse_idx, "single"))
-        
-        # Double-verse forward: (i, i+1)
-        if verse_idx + 1 < len(VERSES_DATA):
-            windows.append((verse_idx, verse_idx + 1, "double_fwd"))
-        
-        # Double-verse backward: (i-1, i)
-        if verse_idx - 1 >= 0:
-            windows.append((verse_idx - 1, verse_idx, "double_bwd"))
-        
-        # Triple centered: (i-1, i, i+1)
-        if verse_idx - 1 >= 0 and verse_idx + 1 < len(VERSES_DATA):
-            windows.append((verse_idx - 1, verse_idx + 1, "triple_center"))
-        
-        # Triple forward: (i, i+1, i+2)
-        if verse_idx + 2 < len(VERSES_DATA):
-            windows.append((verse_idx, verse_idx + 2, "triple_fwd"))
-        
-        # Triple backward: (i-2, i-1, i)
-        if verse_idx - 2 >= 0:
-            windows.append((verse_idx - 2, verse_idx, "triple_bwd"))
-        
-        # logger.info(f"DEBUG SEARCH:   Generated {len(windows)} windows for verse {verse_idx}")
+        # If the original score is already very high, we can skip complex window generation
+        if original_score > 85:
+            logger.info(f"DEBUG SEARCH: Score {original_score} is very high - using single verse only")
+            windows = [(verse_idx, verse_idx, "single")]
+        else:
+            # Generate all window types for this verse
+            windows = []
+            
+            # Single-verse: the top verse
+            windows.append((verse_idx, verse_idx, "single"))
+            
+            # Double-verse forward: (i, i+1)
+            if verse_idx + 1 < len(VERSES_DATA):
+                windows.append((verse_idx, verse_idx + 1, "double_fwd"))
+            
+            # Double-verse backward: (i-1, i)
+            if verse_idx - 1 >= 0:
+                windows.append((verse_idx - 1, verse_idx, "double_bwd"))
+            
+            # Triple centered: (i-1, i, i+1)
+            if verse_idx - 1 >= 0 and verse_idx + 1 < len(VERSES_DATA):
+                windows.append((verse_idx - 1, verse_idx + 1, "triple_center"))
         
         # Score each window and avoid duplicates
         for start_idx, end_idx, window_type in windows:
@@ -164,7 +158,7 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
                     # Use the ShabadID of the original matching verse
                     span_shabad_id = shabad_id
                 
-                # Score the span using weighted scoring: 0.3*ratio + 0.4*partial_ratio + 0.3*token_set_ratio
+                # Score the span using weighted scoring
                 ratio_score = fuzz.ratio(normalized_query, span_text)
                 partial_ratio_score = fuzz.partial_ratio(normalized_query, span_text)
                 token_set_score = fuzz.token_set_ratio(normalized_query, span_text)
@@ -174,10 +168,6 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
                 original_verse = verse_text  # The verse from top 3 that generated this window
                 
                 window_candidates.append((original_verse, span_shabad_id, span_score, window_type, start_idx, end_idx, verse_idx))
-                
-               # logger.info(f"DEBUG SEARCH:     {window_type} ({start_idx}-{end_idx}): {span_score:.2f} (ratio: {ratio_score:.1f}, partial: {partial_ratio_score:.1f}, token_set: {token_set_score:.1f}) | '{span_text[:60]}...'")
-            else:
-                logger.info(f"DEBUG SEARCH:     {window_type} ({start_idx}-{end_idx}): DUPLICATE - skipped")
     
     # Step 4: Find the highest scoring window
     if not window_candidates:
@@ -187,8 +177,8 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
     window_candidates.sort(key=lambda x: x[2], reverse=True)
     best_verse, best_shabad_id, best_score, best_type, best_start, best_end, original_verse_idx = window_candidates[0]
     
-    logger.info("DEBUG SEARCH: Step 4 - Final window results (top 5):")
-    for i, (verse_text, shabad_id, score, window_type, start_idx, end_idx, orig_idx) in enumerate(window_candidates[:5], 1):
+    logger.info("DEBUG SEARCH: Step 4 - Final window results (top 3):")
+    for i, (verse_text, shabad_id, score, window_type, start_idx, end_idx, orig_idx) in enumerate(window_candidates[:3], 1):
         logger.info(f"DEBUG SEARCH:   {i}. {window_type} ({start_idx}-{end_idx}) from original verse {orig_idx}: {score:.2f} , (ShabadID: {shabad_id}) | '{verse_text[:60]}...'")
     
     logger.info(f"DEBUG SEARCH: FINAL RESULT - Best window: {best_type} ({best_start}-{best_end}) with score {best_score:.2f} , Returning ShabadID {best_shabad_id} with verse: '{best_verse}'")
@@ -196,8 +186,6 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
     # Return the best result if above threshold
     if best_score >= threshold:
         return best_verse, best_shabad_id, best_score
-    # elif best_score >= 55:  # I want to be more strict about the threshold of 60, so we are not returning any matches below 60
-      #  return best_verse, best_shabad_id, best_score
     else:
         logger.info("DEBUG SEARCH: No matches found above threshold")
         return None, None, None

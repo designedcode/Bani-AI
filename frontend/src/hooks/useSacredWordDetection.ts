@@ -20,6 +20,8 @@ interface UseSacredWordDetectionReturn {
     sacredWord: string;
   };
   clearTrackingData: () => void;
+  shouldResetSearch: boolean;
+  clearResetFlag: () => void;
 }
 
 // Sacred word pattern categories with their overlay display text
@@ -38,7 +40,7 @@ const SACRED_WORD_CATEGORIES = {
     ],
     displayText: 'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫਤਿਹ'
   },
-  
+
   // Category 2: Lines 7-14 - Mool Mantar
   MOOL_MANTAR: {
     patterns: [
@@ -53,7 +55,7 @@ const SACRED_WORD_CATEGORIES = {
     ],
     displayText: 'ੴ ਸਤਿ ਨਾਮੁ ਕਰਤਾ ਪੁਰਖੁ ਨਿਰਭਉ ਨਿਰਵੈਰੁ ਅਕਾਲ ਮੂਰਤਿ ਅਜੂਨੀ ਸੈਭੰ ਗੁਰ ਪ੍ਰਸਾਦਿ'
   },
-  
+
   // Category 3: Lines 19-22 - Dhan Guru Nanak
   DHAN_GURU_NANAK: {
     patterns: [
@@ -64,7 +66,7 @@ const SACRED_WORD_CATEGORIES = {
     ],
     displayText: 'ਧੰਨ ਗੁਰੂ ਨਾਨਕ'
   },
-  
+
   // Category 4: Lines 29-30 - Bole So Nihal
   BOLE_SO_NIHAL: {
     patterns: [
@@ -76,7 +78,7 @@ const SACRED_WORD_CATEGORIES = {
     ],
     displayText: 'ਬੋਲੇ ਸੋ ਨਿਹਾਲ ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ'
   },
-  
+
   // Category 5: Lines 33, 50 - Waheguru
   WAHEGURU: {
     patterns: [
@@ -85,7 +87,7 @@ const SACRED_WORD_CATEGORIES = {
     ],
     displayText: 'ਵਾਹਿਗੁਰੂ'
   },
-  
+
   // Category 6: Lines 35-37, 51-52 - Ik Onkar
   IK_ONKAR: {
     patterns: [
@@ -96,6 +98,22 @@ const SACRED_WORD_CATEGORIES = {
       'ਇਓਕਾਰ'
     ],
     displayText: 'ੴ'
+  },
+
+  WJKK_WJKF_RESET: {
+    patterns: [
+      'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖ਼ਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫ਼ਤਿਹ',
+      'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫਤਿਹ',
+      'waheguru ji ka khalsa waheguru ji ki fateh',
+      'waheguru ji ka khalsha waheguru ji ki fatheh',
+      'waheguru ji ka khlsa whaeguru ji fatheh',
+      'waheguru ji ka khalsa waheguru ji fatheh',
+      'waheguru ji ka khlsa whaeguru ji ki fateh',
+      'wjkk wjkf',
+      'WJKK WJKF'
+    ],
+    displayText: 'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫਤਿਹ',
+    triggerReset: true
   }
 };
 
@@ -107,7 +125,8 @@ export function useSacredWordDetection(): UseSacredWordDetectionReturn {
     isVisible: false,
     sacredWord: ''
   });
-  
+  const [shouldResetSearch, setShouldResetSearch] = useState(false);
+
   const overlayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastMatchRef = useRef<string>('');
   const shownTextsRef = useRef<Set<string>>(new Set()); // Track texts that have already shown overlay
@@ -116,22 +135,68 @@ export function useSacredWordDetection(): UseSacredWordDetectionReturn {
   // Helper function to check if a match is Mool Mantar
   const isMoolMantar = useCallback((matchText: string): boolean => {
     const normalized = matchText.normalize('NFC');
-    return MOOL_MANTAR_PATTERNS.some(pattern => 
+    return MOOL_MANTAR_PATTERNS.some(pattern =>
       normalized.includes(pattern) || pattern.includes(normalized)
     );
   }, []);
 
-  // Helper function to get the display text for a matched pattern
-  const getDisplayTextForPattern = useCallback((matchText: string): string => {
-    const normalized = matchText.normalize('NFC');
+  // Helper function to check if a match is WJKK WJKF reset phrase - HIGHLY LENIENT
+  const isResetTrigger = useCallback((matchText: string): boolean => {
+    const normalized = matchText.normalize('NFC').toLowerCase();
     
-    // Check for exact pattern match first - this is the key fix
-    for (const category of Object.values(SACRED_WORD_CATEGORIES)) {
-      if (category.patterns.includes(normalized)) {
-        return category.displayText;
+    // Gurmukhi patterns - check for substring containment
+    const gur_full_pattern = 'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖ਼ਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫ਼ਤਿਹ'.normalize('NFC').toLowerCase();
+    const gur_alt_pattern = 'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫਤਿਹ'.normalize('NFC').toLowerCase();
+    const gur_partial1 = 'ਖ਼ਾਲਸਾ'.normalize('NFC').toLowerCase();
+    const gur_partial2 = 'ਖਾਲਸਾ'.normalize('NFC').toLowerCase();
+    const gur_fateh1 = 'ਫ਼ਤਿਹ'.normalize('NFC').toLowerCase();
+    const gur_fateh2 = 'ਫਤਿਹ'.normalize('NFC').toLowerCase();
+    
+    // Check for full or partial Gurmukhi matches
+    if (normalized.includes(gur_full_pattern) || 
+        normalized.includes(gur_alt_pattern) ||
+        (normalized.includes(gur_partial1) && (normalized.includes(gur_fateh1) || normalized.includes(gur_fateh2))) ||
+        (normalized.includes(gur_partial2) && (normalized.includes(gur_fateh1) || normalized.includes(gur_fateh2)))) {
+      console.log('[isResetTrigger] Gurmukhi WJKK WJKF detected');
+      return true;
+    }
+    
+    // English variations - including common misspellings
+    const englishResetPatterns = [
+      'waheguru ji ka khalsa',
+      'waheguru ji ki fateh',
+      'waheguru ji ka khalsa waheguru ji ki fateh',
+      'waheguru ji ka khalsha waheguru ji ki fatheh'   ];
+    
+    // Remove extra spaces and punctuation
+    const cleanedText = normalized.replace(/\s+/g, ' ').trim().replace(/[.,!?;:]/g, '');
+    const withoutSpaces = cleanedText.replace(/\s/g, '');
+    
+    for (const pattern of englishResetPatterns) {
+      const cleanedPattern = pattern.replace(/\s+/g, ' ').trim();
+      const patternWithoutSpaces = cleanedPattern.replace(/\s/g, '');
+      
+      // Check for substring match with flexible spacing
+      if (cleanedText.includes(cleanedPattern) || withoutSpaces.includes(patternWithoutSpaces)) {
+        console.log(`[isResetTrigger] English WJKK WJKF pattern detected: "${pattern}"`);
+        return true;
       }
     }
     
+    return false;
+  }, []);
+
+  // Helper function to get the display text for a matched pattern
+  const getDisplayTextForPattern = useCallback((matchText: string): string => {
+    const normalized = matchText.normalize('NFC').toLowerCase();
+
+    // Check for exact pattern match (case-insensitive for English)
+    for (const category of Object.values(SACRED_WORD_CATEGORIES)) {
+      if (category.patterns.some(p => p.normalize('NFC').toLowerCase() === normalized)) {
+        return category.displayText;
+      }
+    }
+
     // Fallback to original match if no category found
     return matchText;
   }, []);
@@ -155,7 +220,7 @@ export function useSacredWordDetection(): UseSacredWordDetectionReturn {
         ...prev,
         isVisible: false
       }));
-      
+
       // Clear the word after fade out animation
       setTimeout(() => {
         setOverlayState({
@@ -169,7 +234,7 @@ export function useSacredWordDetection(): UseSacredWordDetectionReturn {
   // Function to reset timer for duplicate matches (limited to 3 resets max)
   const resetOverlayTimer = useCallback((sacredWord: string) => {
     const currentResetCount = timerResetCountRef.current.get(sacredWord) || 0;
-    
+
     // Only allow timer reset if we haven't exceeded the limit of 3 resets
     if (currentResetCount < 3) {
       // Clear existing timeout
@@ -186,7 +251,7 @@ export function useSacredWordDetection(): UseSacredWordDetectionReturn {
           ...prev,
           isVisible: false
         }));
-        
+
         // Clear the word after fade out animation
         setTimeout(() => {
           setOverlayState({
@@ -195,7 +260,7 @@ export function useSacredWordDetection(): UseSacredWordDetectionReturn {
           });
         }, 300); // Match CSS transition duration
       }, 3000);
-      
+
       console.log(`[SacredWordDetection] Timer reset for "${sacredWord}" (${currentResetCount + 1}/3)`);
     } else {
       console.log(`[SacredWordDetection] Timer reset limit reached for "${sacredWord}"`);
@@ -203,12 +268,12 @@ export function useSacredWordDetection(): UseSacredWordDetectionReturn {
   }, []);
 
   const detectInTranscript = useCallback((
-    combinedText: string, 
+    combinedText: string,
     context: 'general' | 'shabad' = 'general',
     isDisplayingResults: boolean = false
   ): DetectionResult => {
     const trimmedText = combinedText.trim();
-    
+
     if (!trimmedText) {
       return {
         match: null,
@@ -218,7 +283,7 @@ export function useSacredWordDetection(): UseSacredWordDetectionReturn {
 
     // Single pass detection and removal
     const { matches, filteredText } = detectAndRemoveSacredWords(trimmedText, context);
-    
+
     if (matches.length === 0) {
       return {
         match: null,
@@ -229,15 +294,22 @@ export function useSacredWordDetection(): UseSacredWordDetectionReturn {
     // Get the first match (they're already sorted by priority)
     const bestMatch = matches[0];
 
-    console.log('[SacredWordDetection] Sacred word detected:', bestMatch.match);
+    console.log('[SacredWordDetection] Sacred word detected:', bestMatch.pattern);
+
+    // CRITICAL: Always check for reset trigger FIRST, even when displaying results
+    // This must happen BEFORE the overlay logic and outside shouldShowOverlay condition
+    if (isResetTrigger(bestMatch.pattern)) {
+      console.log('[SacredWordDetection] WJKK WJKF detected - triggering reset (works during results display)');
+      setShouldResetSearch(true);
+    }
 
     // Show overlay logic - only after sacred word has been detected AND removed from filteredText
-    const shouldShowOverlay = !isDisplayingResults || !isMoolMantar(bestMatch.match);
-    
+    const shouldShowOverlay = !isDisplayingResults || !isMoolMantar(bestMatch.pattern);
+
     if (shouldShowOverlay) {
       // Get the categorized display text for this match
-      const displayText = getDisplayTextForPattern(bestMatch.match);
-      
+      const displayText = getDisplayTextForPattern(bestMatch.pattern);
+
       // Use setTimeout to ensure overlay shows after the text processing is complete
       setTimeout(() => {
         // Check if we've already shown overlay for this exact text
@@ -254,7 +326,7 @@ export function useSacredWordDetection(): UseSacredWordDetectionReturn {
         console.log('[SacredWordDetection] Sacred word overlay shown after removal:', displayText);
         shownTextsRef.current.add(displayText);
         timerResetCountRef.current.set(displayText, 0); // Initialize reset count
-        lastMatchRef.current = bestMatch.match;
+        lastMatchRef.current = bestMatch.pattern;
         showOverlay(displayText);
       }, 0); // Use setTimeout with 0 delay to ensure it runs after current execution context
     }
@@ -263,7 +335,7 @@ export function useSacredWordDetection(): UseSacredWordDetectionReturn {
       match: bestMatch,
       filteredTranscript: filteredText
     };
-  }, [isMoolMantar, showOverlay, getDisplayTextForPattern, resetOverlayTimer, overlayState.isVisible, overlayState.sacredWord]);
+  }, [isMoolMantar, showOverlay, getDisplayTextForPattern, resetOverlayTimer, isResetTrigger, overlayState.isVisible, overlayState.sacredWord]);
 
   // Function to clear tracking data (can be called externally if needed)
   const clearTrackingData = useCallback(() => {
@@ -271,6 +343,12 @@ export function useSacredWordDetection(): UseSacredWordDetectionReturn {
     timerResetCountRef.current.clear();
     lastMatchRef.current = '';
     console.log('[SacredWordDetection] Tracking data cleared');
+  }, []);
+
+  // Function to clear the reset flag after it's been consumed
+  const clearResetFlag = useCallback(() => {
+    setShouldResetSearch(false);
+    console.log('[SacredWordDetection] Reset flag cleared');
   }, []);
 
   // Cleanup timeout on unmount
@@ -285,6 +363,8 @@ export function useSacredWordDetection(): UseSacredWordDetectionReturn {
   return {
     detectInTranscript,
     overlayState,
-    clearTrackingData
+    clearTrackingData,
+    shouldResetSearch,
+    clearResetFlag
   };
 } 

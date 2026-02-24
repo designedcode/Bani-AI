@@ -37,7 +37,7 @@ class TranscriptionService {
   private sessionId: string;
 
   constructor() {
-    this.baseUrl = process.env.REACT_APP_API_URL || 'https://bani-ai.onrender.com';
+    this.baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
     this.sessionId = this.generateSessionId();
   }
 
@@ -87,13 +87,10 @@ class TranscriptionService {
         console.log(`No good SGGS match found - no results`);
       }
 
-      // If no results found, refresh the page
+      // If no results found, don't refresh - just notify app
       if (results.length === 0) {
-        console.log('No transcription results found, refreshing page...');
-        setTimeout(() => {
-          window.location.reload();
-        }, 1000); // Small delay to show any loading state
-        throw new Error('No results found - page will refresh');
+        console.log('No transcription results found.');
+        throw new Error('No results found');
       }
 
       return {

@@ -7,6 +7,8 @@ interface UseSpeechRecognitionReturn {
   isListening: boolean;
   transcribedText: string;
   interimTranscript: string;
+  rawTranscribedText: string;
+  rawInterimTranscript: string;
   error: string;
   noSpeechCount: number;
   speechState: SpeechState;
@@ -21,12 +23,17 @@ interface UseSpeechRecognitionReturn {
     isVisible: boolean;
     sacredWord: string;
   };
+  shouldResetSearch: boolean;
+  clearResetFlag: () => void;
+  clearSacredWordTracking: () => void;
 }
 
 export function useSpeechRecognition(isDisplayingResults: boolean = false): UseSpeechRecognitionReturn {
   const [isListening, setIsListening] = useState(false);
   const [transcribedText, setTranscribedText] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
+  const [rawTranscribedText, setRawTranscribedText] = useState('');
+  const [rawInterimTranscript, setRawInterimTranscript] = useState('');
   const [error, setError] = useState('');
   const [noSpeechCount, setNoSpeechCount] = useState(0);
   const [speechState, setSpeechState] = useState<SpeechState>(SpeechState.IDLE);
@@ -34,14 +41,16 @@ export function useSpeechRecognition(isDisplayingResults: boolean = false): UseS
   const [isAutoRestartEnabled, setIsAutoRestartEnabledState] = useState(true);
 
   const volumeUpdateRef = useRef<number | null>(null);
-  
+
   // Use refs to track current state values for the callback
   const transcribedTextRef = useRef('');
   const interimTranscriptRef = useRef('');
+  const rawTranscribedTextRef = useRef('');
+  const rawInterimTranscriptRef = useRef('');
 
   // Initialize sacred word detection hook
-  const { detectInTranscript, overlayState } = useSacredWordDetection();
-  
+  const { detectInTranscript, overlayState, shouldResetSearch, clearResetFlag, clearTrackingData } = useSacredWordDetection();
+
   // Create a stable ref for detectInTranscript to prevent recreating handleResult
   const detectInTranscriptRef = useRef(detectInTranscript);
   useEffect(() => {
@@ -57,25 +66,37 @@ export function useSpeechRecognition(isDisplayingResults: boolean = false): UseS
     interimTranscriptRef.current = interimTranscript;
   }, [interimTranscript]);
 
+  useEffect(() => {
+    rawTranscribedTextRef.current = rawTranscribedText;
+  }, [rawTranscribedText]);
+
+  useEffect(() => {
+    rawInterimTranscriptRef.current = rawInterimTranscript;
+  }, [rawInterimTranscript]);
+
+
   // Create stable callback for result handling using refs to avoid recreating
   const handleResult = useCallback((result: SpeechRecognitionResult) => {
     if (result.isFinal) {
-      // For final results, only combine previous transcribed text with the final transcript
-      // Don't include interim transcript as it's already part of the final transcript
-      const combinedText = (transcribedTextRef.current + ' ' + result.transcript).trim();
+      const combinedText = (rawTranscribedTextRef.current + ' ' + result.transcript).trim();
       const detection = detectInTranscriptRef.current(combinedText, 'general', isDisplayingResults);
 
       console.log('[SpeechRecognition] Final result processed, filtered transcript:', detection.filteredTranscript);
 
       setTranscribedText(detection.filteredTranscript);
+      setRawTranscribedText(combinedText);
       setInterimTranscript('');
+      setRawInterimTranscript('');
     } else {
-      // Handle interim results separately
-      const combinedText = (transcribedTextRef.current + ' ' + result.transcript).trim();
+      const combinedText = (rawTranscribedTextRef.current + ' ' + result.transcript).trim();
       const detection = detectInTranscriptRef.current(combinedText, 'general', isDisplayingResults);
 
+      // Raw interim is just the current result transcript
+      setRawInterimTranscript(result.transcript.trim());
+
+      // Filtered interim calculation:
+      // We take the full filtered text and subtract the already-filtered transcribed text
       const filteredInterim = detection.filteredTranscript.substring(transcribedTextRef.current.length).trim();
-      
       setInterimTranscript(filteredInterim);
     }
   }, [isDisplayingResults]); // Only depend on isDisplayingResults, use ref for detectInTranscript
@@ -124,12 +145,16 @@ export function useSpeechRecognition(isDisplayingResults: boolean = false): UseS
       // Immediately and aggressively clear all transcription when max ends reached
       setTranscribedText('');
       setInterimTranscript('');
+      setRawTranscribedText('');
+      setRawInterimTranscript('');
       setError('');
 
       // Force a synchronous clear by using a timeout to ensure state updates
       setTimeout(() => {
         setTranscribedText('');
         setInterimTranscript('');
+        setRawTranscribedText('');
+        setRawInterimTranscript('');
       }, 0);
     });
 
@@ -164,6 +189,8 @@ export function useSpeechRecognition(isDisplayingResults: boolean = false): UseS
   const resetTranscription = useCallback(() => {
     setTranscribedText('');
     setInterimTranscript('');
+    setRawTranscribedText('');
+    setRawInterimTranscript('');
     setError('');
     setNoSpeechCount(0);
   }, []);
@@ -179,11 +206,11 @@ export function useSpeechRecognition(isDisplayingResults: boolean = false): UseS
       const enabled = speechRecognitionManager.isAutoRestartEnabled();
       setIsAutoRestartEnabledState(enabled);
     };
-    
+
     // Check initially and set up periodic check
     checkAutoRestart();
     const interval = setInterval(checkAutoRestart, 1000);
-    
+
     return () => clearInterval(interval);
   }, []);
 
@@ -191,6 +218,8 @@ export function useSpeechRecognition(isDisplayingResults: boolean = false): UseS
     isListening,
     transcribedText,
     interimTranscript,
+    rawTranscribedText,
+    rawInterimTranscript,
     error,
     noSpeechCount,
     speechState,
@@ -201,6 +230,9 @@ export function useSpeechRecognition(isDisplayingResults: boolean = false): UseS
     resetTranscription,
     setAutoRestart,
     isAutoRestartEnabled,
-    sacredWordOverlay: overlayState
+    sacredWordOverlay: overlayState,
+    shouldResetSearch,
+    clearResetFlag,
+    clearSacredWordTracking: clearTrackingData
   };
 }

@@ -7,7 +7,7 @@ interface AudioVisualizerProps {
 
 const AudioVisualizer: React.FC<AudioVisualizerProps> = ({ isListening }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animationRef = useRef<number>();
+  const animationRef = useRef<number>(null!);
 
   useEffect(() => {
     if (!isListening || !canvasRef.current) return;
@@ -25,17 +25,17 @@ const AudioVisualizer: React.FC<AudioVisualizerProps> = ({ isListening }) => {
       // Create animated bars
       const barCount = 20;
       const barWidth = canvas.width / barCount;
-      
+
       for (let i = 0; i < barCount; i++) {
         const height = Math.random() * canvas.height * 0.8;
         const x = i * barWidth;
         const y = canvas.height - height;
-        
+
         // Create gradient
         const gradient = ctx.createLinearGradient(x, y, x, canvas.height);
         gradient.addColorStop(0, '#667eea');
         gradient.addColorStop(1, '#764ba2');
-        
+
         ctx.fillStyle = gradient;
         ctx.fillRect(x, y, barWidth - 2, height);
       }

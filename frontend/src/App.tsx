@@ -35,13 +35,18 @@ function App() {
     isListening,
     transcribedText,
     interimTranscript,
+    rawTranscribedText,
+    rawInterimTranscript,
     error,
     noSpeechCount,
     volume,
     start: startSpeechRecognition,
     returnToLoadingOverlay,
     resetTranscription,
-    sacredWordOverlay
+    sacredWordOverlay,
+    shouldResetSearch,
+    clearResetFlag,
+    clearSacredWordTracking
   } = useSpeechRecognition(shabads.length > 0);
 
 
@@ -81,6 +86,12 @@ function App() {
         setLastSggsMatchFound(response.sggs_match_found);
         setLastBestSggsMatch(response.best_sggs_match);
 
+        // IMMEDIATE UI TRANSITION:
+        // Hide loader as soon as we have a match from the backend
+        // Even if the full shabad isn't fetched yet
+        setShowLoader(false);
+        shabadsLoadedRef.current = true;
+
         // Fetch full shabad if not already loaded
         const newShabadId = response.results[0].shabad_id;
         if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
@@ -98,13 +109,15 @@ function App() {
     } catch (err) {
       console.error('Transcription error:', err);
 
-      // Check if this is a "no results" error that will trigger page refresh
-      if (err instanceof Error && err.message.includes('No results found - page will refresh')) {
-        // Don't show error message, just let the page refresh happen
-        setUserMessage('No results found. Refreshing...');
+      // Check if this is a "no results" error 
+      if (err instanceof Error && err.message === 'No results found') {
+        // Just reset flags so user can try again by speaking more
+        transcriptionSentRef.current = false;
+        wordCountTriggeredRef.current = false;
+        console.log('No results found - allowing user to continue speaking');
       } else {
         setUserMessage('Failed to process transcription');
-        // Reset the flag on error so user can try again
+        // Reset the flags on other errors so user can try again
         transcriptionSentRef.current = false;
         wordCountTriggeredRef.current = false;
       }
@@ -113,7 +126,67 @@ function App() {
     }
   }, [shabads, searchTriggered, isProcessing, noSpeechCount]);
 
+  // Show live transcription as subtitle during loading (RAW for user feedback)
+  useEffect(() => {
+    // Immediately clear subtitle if max no-speech errors reached
+    if (noSpeechCount >= 3) {
+      setSubtitleText('');
+      return;
+    }
 
+    if (showLoader && !showMatchedSubtitle && !shabadsLoadedRef.current && noSpeechCount < 3) {
+      // Use raw text for better user feedback on the logo screen
+      const fullSubtitle = (rawTranscribedText + ' ' + rawInterimTranscript).trim();
+
+      // Limit to last 8 words as requested
+      const words = fullSubtitle.split(/\s+/).filter(w => w.length > 0);
+      const last8Words = words.length > 8 ? words.slice(-8).join(' ') : fullSubtitle;
+
+      // Add database match if we have one
+      let displayText = last8Words;
+      if (lastBestSggsMatch && last8Words) {
+        // Add separator and show the matched database shabad
+        displayText = `${last8Words} || ${lastBestSggsMatch}`;
+      }
+
+      setSubtitleText(displayText);
+    }
+  }, [rawTranscribedText, rawInterimTranscript, showLoader, showMatchedSubtitle, noSpeechCount, lastBestSggsMatch]);
+
+  // Handle WJKK WJKF reset - clear search results display and return to home
+  useEffect(() => {
+    if (shouldResetSearch) {
+      console.log('[App] WJKK WJKF reset detected - returning to homepage');
+
+      // Return to initial loading screen with glowing animation
+      setShowLoader(true);
+      setShowMatchedSubtitle(false);
+
+      // Clear all shabads and transcription
+      setShabads([]);
+      resetTranscription();
+      setLastSggsMatchFound(null);
+      setLastBestSggsMatch(null);
+
+      // Clear UI feedback
+      setSubtitleText('');
+      setUserMessage('');
+
+      // Reset all internal tracking flags
+      transcriptionSentRef.current = false;
+      wordCountTriggeredRef.current = false;
+      shabadsLoadedRef.current = false;
+
+      // Clear sacred word detection tracking to prevent overlay issues
+      clearSacredWordTracking();
+
+      // Ensure we are listening
+      startSpeechRecognition();
+
+      // Clear the trigger flag
+      clearResetFlag();
+    }
+  }, [shouldResetSearch, clearResetFlag, resetTranscription, startSpeechRecognition, clearSacredWordTracking]);
 
   // Handle speech recognition results and trigger transcription
   useEffect(() => {
@@ -129,13 +202,13 @@ function App() {
 
     // Use pre-filtered text from speech recognition hook
     const combinedText = (transcribedText + ' ' + interimTranscript).trim();
-    
+
     if (!combinedText) {
       return;
     }
 
     setIsFiltering(true);
-    
+
     try {
       // Count words on the already-filtered text from speech recognition
       const wordCount = combinedText.split(/\s+/).filter(word => word.length > 0).length;
@@ -146,7 +219,7 @@ function App() {
       // Send transcription only if text has 8+ words (and other conditions met)
       if (wordCount >= 8 && !wordCountTriggeredRef.current && !shabadsLoadedRef.current && !transcriptionSentRef.current) {
         wordCountTriggeredRef.current = true; // Mark that we've triggered the 8+ word condition
-        
+
         console.log('[App] Triggering API call with pre-filtered text');
         sendTranscription(combinedText, 0.8); // Send pre-filtered text to API
       }
@@ -169,22 +242,22 @@ function App() {
   useEffect(() => {
     if (noSpeechCount >= 3 && shabads.length > 0) {
       setShowLoader(true);
-      
+
       // Clear shabads to force fresh search
       setShabads([]);
-      
+
       // Aggressively reset ALL transcription-related state
       resetTranscription(); // Clear all transcribed text
       transcriptionSentRef.current = false;
       wordCountTriggeredRef.current = false;
       shabadsLoadedRef.current = false;
-      
+
       // Clear all subtitle and match state immediately
       setSubtitleText('');
       setShowMatchedSubtitle(false);
       setLastSggsMatchFound(null);
       setLastBestSggsMatch(null);
-      
+
       // Force another clear after a brief delay to ensure state updates
       setTimeout(() => {
         setSubtitleText('');
@@ -193,13 +266,13 @@ function App() {
     }
   }, [noSpeechCount, shabads.length, resetTranscription]);
 
-  // Hide loader as soon as a shabad is found
+  // Hide loader as soon as a shabad is found (redundant now, but kept for safety)
   useEffect(() => {
-    if (shabads.length > 0) {
+    if (shabads.length > 0 && showLoader) {
       setShowLoader(false);
-      shabadsLoadedRef.current = true; // Update ref when shabads are loaded
+      shabadsLoadedRef.current = true;
     }
-  }, [shabads]);
+  }, [shabads, showLoader]);
 
   // Show live transcription as subtitle during loading (FILTERED)
   useEffect(() => {
@@ -208,7 +281,7 @@ function App() {
       setSubtitleText('');
       return;
     }
-    
+
     if (showLoader && !showMatchedSubtitle && !shabadsLoadedRef.current && noSpeechCount < 3) {
       // Use pre-filtered text from speech recognition hook
       const subtitle = (transcribedText + ' ' + interimTranscript).trim();
@@ -290,9 +363,9 @@ function App() {
 
   return (
     <>
-      <LoadingOverlay 
-        className={showLoader ? '' : 'fade-out'} 
-        volume={volume} 
+      <LoadingOverlay
+        className={showLoader ? '' : 'fade-out'}
+        volume={volume}
         subtitle={showLoader ? subtitleText : undefined}
       />
       <SacredWordOverlay
@@ -334,6 +407,14 @@ function App() {
           )}
 
           <main className="App-main">
+            {/* Show loading indicator if transitioned but shabads not yet loaded */}
+            {!showLoader && shabads.length === 0 && (
+              <div className="shabad-loading-container">
+                <div className="spinner"></div>
+                <p>Establishing connection to database...</p>
+              </div>
+            )}
+
             {/* Show Full Shabad box if present */}
             {shabads.length > 0 && (
               <div className="panel-header search-results" style={{ marginBottom: '2rem' }}>

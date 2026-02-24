@@ -24,13 +24,13 @@ from main import (
 
 async def test_enhanced_fuzzy_matching():
     """Test the enhanced fuzzy matching functionality"""
-    print("🔄 Loading SGGS data and inverted index...")
+    print("[*] Loading SGGS data and inverted index...")
     
     await load_sggs_data()
     await load_inverted_index()
     
-    print(f"✅ Data loaded successfully!")
-    print(f"📊 Configuration:")
+    print(f"[OK] Data loaded successfully!")
+    print(f"[INFO] Configuration:")
     print(f"   - FUZZY_WORD_THRESHOLD: {FUZZY_WORD_THRESHOLD}")
     print(f"   - EXACT_WORD_INTERSECTION_MIN: {EXACT_WORD_INTERSECTION_MIN}")
     print(f"   - FUZZY_WORD_MAX_MATCHES: {FUZZY_WORD_MAX_MATCHES}")
@@ -64,13 +64,13 @@ async def test_enhanced_fuzzy_matching():
         description = test_case["description"]
         
         print(f"\n{'='*60}")
-        print(f"🧪 Test {i}: {description}")
-        print(f"📝 Query: '{query}'")
+        print(f"[TEST {i}] {description}")
+        print(f"[QUERY] '{query}'")
         print(f"{'='*60}")
         
         # Test individual word fuzzy matching
         words = query.split()
-        print(f"🔍 Individual word analysis:")
+        print(f"[ANALYSIS] Individual word analysis:")
         for word in words:
             if len(word) > 2:
                 fuzzy_candidates = get_fuzzy_word_matches(word)
@@ -78,18 +78,18 @@ async def test_enhanced_fuzzy_matching():
         
         # Test candidate line extraction
         candidates = get_candidate_lines_from_index(query)
-        print(f"📋 Candidate lines from enhanced index: {len(candidates)}")
+        print(f"[INDEX] Candidate lines from enhanced index: {len(candidates)}")
         
         # Test final fuzzy search
-        print(f"🎯 Final fuzzy search results:")
+        print(f"[RESULTS] Final fuzzy search results:")
         results = fuzzy_search_sggs(query)
         
         if results:
             line, score = results[0]
-            print(f"   ✅ Best match (score: {score:.2f})")
-            print(f"   📄 Line: {line[:80]}{'...' if len(line) > 80 else ''}")
+            print(f"   [OK] Best match (score: {score:.2f})")
+            print(f"   [LINE] {line[:80]}{'...' if len(line) > 80 else ''}")
         else:
-            print(f"   ❌ No matches found")
+            print(f"   [FAIL] No matches found")
 
 if __name__ == "__main__":
     asyncio.run(test_enhanced_fuzzy_matching())

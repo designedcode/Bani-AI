@@ -96,10 +96,10 @@ function calculateContextualScore(phrase: string, text: string): number {
 function calculateDirectScoreWithSequence(phrase: string, text: string): number {
   // First check for sequence match
   const sequenceScore = calculateSequenceScore(phrase, text);
-  
+
   // Also calculate simple similarity
   const simpleSimilarity = similarity(phrase, text) * 100;
-  
+
   // Prioritize sequence match if it exists (is > 0), otherwise use simple similarity
   if (sequenceScore > 0) {
     return sequenceScore;
@@ -259,17 +259,17 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
     const gurmukhiLines = allLines.map(({ line }) =>
       line.gurmukhi_original || (line.gurmukhi_highlighted ? line.gurmukhi_highlighted.replace(/<[^>]+>/g, '') : '') || ''
     );
-    
+
     // Extract current shabad index from highlighted line
     const currentShabadIndex = highlightedLineIndex !== null ? allLines[highlightedLineIndex].shabadIndex : null;
-    
+
     // Create mapping function from line index to shabad index
     const lineToShabadMap = (index: number) => allLines[index].shabadIndex;
-    
+
     const result = progressiveFuzzySearch(transcribedText, gurmukhiLines, highlightedLineIndex, currentShabadIndex, lineToShabadMap);
     if (result) {
       const newHighlightedIndex = result.bestLineIndex;
-      
+
       // Persistence logic commented out - allowing immediate updates
       /*
       // Persistence logic: only switch if same candidate stays best for 2 consecutive tokens
@@ -285,25 +285,25 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
       // Only update highlighted line if candidate has persisted for 2 consecutive tokens
       if (candidatePersistenceRef.current.count >= 1) {
       */
-        // Log score when highlight changes
-        if (highlightedLineIndex !== newHighlightedIndex) {
-          console.log('[HIGHLIGHT CHANGE] Line:', newHighlightedIndex, 'Score:', result.bestScore.toFixed(2));
-        }
-        setHighlightedLineIndex(newHighlightedIndex);
-        
-        // If at second last or last line of last shabad, trigger fetch for next shabad
-        const lastShabad = shabads[shabads.length - 1];
-        const lastShabadStartIdx = allLines.findIndex(l => l.shabadIndex === shabads.length - 1 && l.lineIndex === 0);
-        const lastShabadLines = (lastShabad?.lines_highlighted || []).length;
-        if (
-          (newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 2 ||
-            newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 1) &&
-          lastShabad.shabad_id &&
-          nextShabadRequestedRef.current !== lastShabad.shabad_id
-        ) {
-          nextShabadRequestedRef.current = lastShabad.shabad_id;
-          onNeedNextShabad();
-        }
+      // Log score when highlight changes
+      if (highlightedLineIndex !== newHighlightedIndex) {
+        console.log('[HIGHLIGHT CHANGE] Line:', newHighlightedIndex, 'Score:', result.bestScore.toFixed(2));
+      }
+      setHighlightedLineIndex(newHighlightedIndex);
+
+      // If at second last or last line of last shabad, trigger fetch for next shabad
+      const lastShabad = shabads[shabads.length - 1];
+      const lastShabadStartIdx = allLines.findIndex(l => l.shabadIndex === shabads.length - 1 && l.lineIndex === 0);
+      const lastShabadLines = (lastShabad?.lines_highlighted || []).length;
+      if (
+        (newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 2 ||
+          newHighlightedIndex === lastShabadStartIdx + lastShabadLines - 1) &&
+        lastShabad.shabad_id &&
+        nextShabadRequestedRef.current !== lastShabad.shabad_id
+      ) {
+        nextShabadRequestedRef.current = lastShabad.shabad_id;
+        onNeedNextShabad();
+      }
       /*
       }
       */
@@ -340,17 +340,33 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
     }
   };
 
-  // Render unified view with all lines
+  // Render unified view with all lines - LIMITED TO 10 LINES MAX
   const renderUnifiedView = () => {
+    // Calculate which lines to show based on highlighted line
+    let startIdx = 0;
+    let endIdx = allLines.length;
+
+    // If we have a highlighted line, center it and show surrounding lines
+    if (highlightedLineIndex !== null) {
+      // Show 7 lines before and 2 lines after highlighted line (total ~10)
+      startIdx = Math.max(0, highlightedLineIndex - 7);
+      endIdx = Math.min(allLines.length, highlightedLineIndex + 3); // 3 lines after for context
+    } else {
+      // If no highlighted line yet, just show first 10 lines
+      endIdx = Math.min(allLines.length, 10);
+    }
+
+    const visibleLines = allLines.slice(startIdx, endIdx);
+
     return (
       <div className="unified-shabad-display">
-        {allLines.map(({ line, shabadIndex, lineIndex }, idx) => {
-          // No shabadHeader or divider
+        {visibleLines.map(({ line, shabadIndex, lineIndex }, relativeIdx) => {
+          const absoluteIdx = startIdx + relativeIdx;
           return (
             <div
               key={`shabad${shabadIndex}-line${lineIndex}`}
-              ref={el => (lineRefs.current[idx] = el)}
-              className={getLineClass(idx)}
+              ref={el => { lineRefs.current[absoluteIdx] = el; }}
+              className={getLineClass(absoluteIdx)}
             >
               <div className="gurmukhi-text">
                 {line.gurmukhi_highlighted || line.gurmukhi_original}
