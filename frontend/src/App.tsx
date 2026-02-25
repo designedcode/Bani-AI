@@ -9,9 +9,6 @@ import { transcriptionService } from './services/transcriptionService';
 import { banidbService } from './services/banidbService';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 
-
-
-
 function App() {
   const [shabads, setShabads] = useState<any[]>([]);
   const [searchTriggered] = useState(false);

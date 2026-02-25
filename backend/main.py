@@ -1,3 +1,4 @@
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -10,6 +11,8 @@ import sqlite3
 import aiosqlite
 from rapidfuzz import fuzz, process
 from functools import lru_cache
+#added new import for shabad tracker
+from shabad_confirmation import ShabadTracker 
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -41,6 +44,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # --- Database Fuzzy Search Setup ---
 from pathlib import Path
 
@@ -68,8 +72,6 @@ async def load_database_verses():
             DATABASE_LOADED = False
     else:
         logger.warning(f"Database not found at {DATABASE_PATH}. Fuzzy search will be disabled.")
-
-
 
 @lru_cache(maxsize=1000)
 def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
@@ -123,6 +125,7 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
         windows = []
         
         # Single-verse: the top verse
+  
         windows.append((verse_idx, verse_idx, "single"))
         
         # Double-verse forward: (i, i+1)
@@ -189,7 +192,7 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
     
     logger.info("DEBUG SEARCH: Step 4 - Final window results (top 5):")
     for i, (verse_text, shabad_id, score, window_type, start_idx, end_idx, orig_idx) in enumerate(window_candidates[:5], 1):
-        logger.info(f"DEBUG SEARCH:   {i}. {window_type} ({start_idx}-{end_idx}) from original verse {orig_idx}: {score:.2f} , (ShabadID: {shabad_id}) | '{verse_text[:60]}...'")
+      logger.info(f"DEBUG SEARCH:   {i}. {window_type} ({start_idx}-{end_idx}) from original verse {orig_idx}: {score:.2f} , (ShabadID: {shabad_id}) | '{verse_text[:60]}...'")
     
     logger.info(f"DEBUG SEARCH: FINAL RESULT - Best window: {best_type} ({best_start}-{best_end}) with score {best_score:.2f} , Returning ShabadID {best_shabad_id} with verse: '{best_verse}'")
 
@@ -202,8 +205,6 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
         logger.info("DEBUG SEARCH: No matches found above threshold")
         return None, None, None
 
-
-
 @app.get("/")
 async def root():
     return {"message": "Bani AI Transcription API"}
@@ -212,37 +213,118 @@ async def root():
 async def health_check():
     return {"status": "healthy", "service": "Bani AI Transcription"}
 
+#updated
 @app.post("/api/transcribe")
 async def transcribe_and_search(request: TranscriptionRequest) -> TranscriptionResponse:
-    """Process transcription and return database fuzzy search results"""
-    transcribed_text = request.text
-    confidence = request.confidence
-    
-    logger.info(f"Received transcription: {transcribed_text} (confidence: {confidence})")
+    """
+    Enhanced transcription endpoint with:
+    - Shabad confirmation
+    - Hybrid local + global validation
+    - Drift detection
+    - Session-based tracking
+    """
 
-    # Fuzzy search database
-    best_verse, best_shabad_id, best_score = fuzzy_search_database(transcribed_text, FUZZY_THRESHOLD)
-    logger.info(f"Fuzzy search threshold: {FUZZY_THRESHOLD}")
-    
+    transcribed_text = request.text.strip()
+    confidence = request.confidence
+    session_id = request.session_id or "default"
+
+    logger.info(f"[API] Received request | Session={session_id} | Confidence={confidence}")
+
+    # -------------------------------
+    # Get / Create ShabadTracker
+    # -------------------------------
+
+    if session_id not in TRACKERS:
+
+        TRACKERS[session_id] = ShabadTracker(
+
+            global_search_function=global_search_wrapper,
+            local_search_function=local_search_inside_shabad
+        )
+
+    tracker = TRACKERS[session_id]
+    logger.info(f"[TRACKER] Active trackers: {len(TRACKERS)}")
+
+    # -------------------------------
+    # Process chunk through tracker
+    # -------------------------------
+    tracker_result = tracker.process_chunk(transcribed_text)
+    logger.info(f"[TRACKER] Result → {tracker_result}")
+
     sggs_match_found = False
     shabad_id = 0
     best_sggs_match = ""
     best_sggs_score = None
-    
-    if best_verse and best_shabad_id and best_score:
-        shabad_id = best_shabad_id
-        best_sggs_match = best_verse
-        best_sggs_score = best_score
-        logger.info(f"Best fuzzy match: Score={best_score:.2f}, ShabadID={best_shabad_id}")
-        logger.info(f"Verse: '{best_verse}'")
-        logger.info(f"Transcription: '{transcribed_text}'")
-        
-        if best_score >= FUZZY_THRESHOLD:
+
+    # -------------------------------
+    # CASE 1 → Newly Confirmed
+    # -------------------------------
+    if tracker_result["status"] == "confirmed":
+        sggs_match_found = True
+        shabad_id = tracker_result["shabad_id"]
+        best_sggs_match = tracker_result["line"]
+        best_sggs_score = tracker_result["score"]
+
+        logger.info(f"[SESSION {session_id}] Shabad CONFIRMED → {shabad_id}")
+
+    # -------------------------------
+    # CASE 2 → Tracking Ongoing
+    # -------------------------------
+    elif tracker_result["status"] == "tracking":
+        sggs_match_found = True
+        shabad_id = tracker_result["shabad_id"]
+
+        # Do hybrid validation
+        local_result = local_search_inside_shabad(shabad_id, transcribed_text)
+        global_result = global_search_wrapper(transcribed_text)
+
+        if local_result and global_result:
+            # If both agree → high confidence
+            if local_result["shabad_id"] == global_result["shabad_id"]:
+                best_sggs_match = local_result["line"]
+                best_sggs_score = max(local_result["score"], global_result["score"])
+                logger.info(f"[SESSION {session_id}] Hybrid match SUCCESS")
+            else:
+                # Global stronger → possible drift
+                if global_result["score"] > local_result["score"]:
+                    logger.warning(f"[SESSION {session_id}] Global stronger than local → possible drift")
+
+                best_sggs_match = local_result["line"]
+                best_sggs_score = local_result["score"]
+
+        elif local_result:
+            best_sggs_match = local_result["line"]
+            best_sggs_score = local_result["score"]
+
+    # -------------------------------
+    # CASE 3 → Drift Detected
+    # -------------------------------
+    elif tracker_result["status"] == "drift_detected":
+        logger.warning(f"[SESSION {session_id}] Drift detected → Resetting alignment")
+
+        # After reset, attempt fresh global search
+        fresh = global_search_wrapper(transcribed_text)
+
+        if fresh:
             sggs_match_found = True
-        else:
-            logger.info(f"Best match below threshold ({FUZZY_THRESHOLD}). No match used.")
+            shabad_id = fresh["shabad_id"]
+            best_sggs_match = fresh["line"]
+            best_sggs_score = fresh["score"]
+
+
+    # -------------------------------
+    # No Match
+    # -------------------------------
     else:
-        logger.info("No fuzzy matches found at all.")
+        logger.info(f"[SESSION {session_id}] No match yet.")
+
+
+        logger.info(
+    f"[RESPONSE] session={session_id} "
+    f"match={sggs_match_found} "
+    f"shabad_id={shabad_id} "
+    f"score={best_sggs_score}"
+)
 
     return TranscriptionResponse(
         transcribed_text=transcribed_text,
@@ -255,6 +337,59 @@ async def transcribe_and_search(request: TranscriptionRequest) -> TranscriptionR
     )
 
 
+# added new class for shabad tracking and confirmation
+def local_search_inside_shabad(shabad_id: int, query: str):
+    """
+    Search ONLY inside a specific shabad.
+    """
+
+    if not DATABASE_LOADED or not query.strip():
+        return None
+
+    normalized_query = unicodedata.normalize('NFC', query.strip())
+
+    # Filter verses belonging to that shabad
+    shabad_verses = [
+        verse_text for sid, verse_text in VERSES_DATA if sid == shabad_id
+    ]
+
+    if not shabad_verses:
+        return None
+
+    # Batch fuzzy scoring
+    results = process.extract(
+        normalized_query,
+        shabad_verses,
+        scorer=fuzz.ratio,
+        limit=1
+    )
+
+    if not results:
+        return None
+
+    best_text, score, _ = results[0]
+
+    return {
+        "shabad_id": shabad_id,
+        "line": best_text,
+        "score": score
+    }
+
+TRACKERS = {}
+
+#global search wrapper to be used in shabad tracker
+
+def global_search_wrapper(query: str):
+    verse, shabad_id, score = fuzzy_search_database(query)
+
+    if not verse:
+        return None
+
+    return {
+        "shabad_id": shabad_id,
+        "line": verse,
+        "score": score
+    }
 
 @app.get("/api/test-database-search")
 async def test_database_search_endpoint(query: str):

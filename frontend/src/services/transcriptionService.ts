@@ -1,7 +1,5 @@
 // Transcription service for REST API communication
 
-// Transcription service for REST API communication
-
 export interface TranscriptionRequest {
   text: string;
   confidence: number;
@@ -38,6 +36,7 @@ class TranscriptionService {
 
   constructor() {
     this.baseUrl = process.env.REACT_APP_API_URL || 'https://bani-ai.onrender.com';
+   //this.baseUrl = 'http://127.0.0.1:8000';
     this.sessionId = this.generateSessionId();
   }
 
@@ -105,10 +104,6 @@ class TranscriptionService {
       throw error;
     }
   }
-
-
-
-
 
   getSessionId(): string {
     return this.sessionId;

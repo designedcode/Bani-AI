@@ -2,7 +2,6 @@
 """
 Test script for enhanced fuzzy word matching in inverted index
 """
-
 import asyncio
 import sys
 import os
