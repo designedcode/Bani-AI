@@ -17,14 +17,15 @@ function App() {
   const [showLoader, setShowLoader] = useState(true);
   const [userMessage, setUserMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [previousShabadId, setPreviousShabadId] = useState<number | null>(null); //New
 
   const shabadsBeingFetched = useRef<Set<number>>(new Set());
   const shabadsLoadedRef = useRef(false); // Track if shabads are loaded
   const transcriptionSentRef = useRef(false); // Track if we've already sent a transcription
   const wordCountTriggeredRef = useRef(false); // Track if 8+ words have been reached
+  const processedWordCountRef = useRef(0); // 👈 tracks how many words already sent
   const [subtitleText, setSubtitleText] = useState('');
   const [showMatchedSubtitle, setShowMatchedSubtitle] = useState(false);
-  const [isFiltering, setIsFiltering] = useState(false);
   const MATCH_DISPLAY_DELAY = 1800; // ms
 
   // Use the new speech recognition hook - keep running even when shabads are loaded
@@ -41,116 +42,150 @@ function App() {
     sacredWordOverlay
   } = useSpeechRecognition(shabads.length > 0);
 
-
-
   // Simple function to send transcription data via HTTP (no debouncing)
-  const sendTranscription = useCallback(async (text: string, confidence: number) => {
-    // Don't send if max no-speech errors reached
-    if (noSpeechCount >= 3) {
-      return;
-    }
+ const sendTranscription = useCallback(async (text: string, confidence: number) => {
+  if (noSpeechCount >= 3) return;
+  if (transcriptionSentRef.current) return;
+  if (isProcessing) return;
+  if (shabadsLoadedRef.current || searchTriggered) return;
 
-    // Don't send if we've already sent a transcription successfully
-    if (transcriptionSentRef.current) {
-      return;
-    }
+  try {
+    setIsProcessing(true);
+    transcriptionSentRef.current = true;
 
-    // Don't send if already processing
-    if (isProcessing) {
-      return;
-    }
+    const response = await transcriptionService.transcribeAndSearch(text, confidence);
 
-    // IMPORTANT: Don't process transcription if we already have shabads loaded
-    if (shabadsLoadedRef.current || searchTriggered) {
-      return;
-    }
-
-    try {
-      setIsProcessing(true);
-
-      // Mark that we're sending a transcription to prevent duplicates
-      transcriptionSentRef.current = true;
-
-      const response = await transcriptionService.transcribeAndSearch(text, confidence);
-
-      // Update state with response - only keep what we actually use
-      if (response.results && response.results.length > 0) {
-        setLastSggsMatchFound(response.sggs_match_found);
-        setLastBestSggsMatch(response.best_sggs_match);
-
-        // Fetch full shabad if not already loaded
-        const newShabadId = response.results[0].shabad_id;
-        if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
-          shabadsBeingFetched.current.add(newShabadId);
-          try {
-            const shabadData = await banidbService.getFullShabad(newShabadId);
-            setShabads(prev => [...prev, shabadData]);
-          } catch (err) {
-            console.error('Error fetching full shabad:', err);
-          } finally {
-            shabadsBeingFetched.current.delete(newShabadId);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Transcription error:', err);
-
-      // Check if this is a "no results" error that will trigger page refresh
-      if (err instanceof Error && err.message.includes('No results found - page will refresh')) {
-        // Don't show error message, just let the page refresh happen
-        setUserMessage('No results found. Refreshing...');
-      } else {
-        setUserMessage('Failed to process transcription');
-        // Reset the flag on error so user can try again
-        transcriptionSentRef.current = false;
-        wordCountTriggeredRef.current = false;
-      }
-    } finally {
+    // 🚫 8 words not ready yet
+    if (!response) {
+      console.log('[App] Waiting for 8 new words...');
+      transcriptionSentRef.current = false;
       setIsProcessing(false);
-    }
-  }, [shabads, searchTriggered, isProcessing, noSpeechCount]);
-
-
-
-  // Handle speech recognition results and trigger transcription
-  useEffect(() => {
-    // Don't process transcription if max no-speech errors reached
-    if (noSpeechCount >= 3) {
       return;
     }
 
-    // Don't process if currently filtering
-    if (isFiltering) {
+    // 🚫 No results returned
+    if (!response.results || response.results.length === 0) {
+      console.log('[CONFIRMATION] No results found.');
+      transcriptionSentRef.current = false;
+      wordCountTriggeredRef.current = false;
+      setIsProcessing(false);
       return;
     }
 
-    // Use pre-filtered text from speech recognition hook
-    const combinedText = (transcribedText + ' ' + interimTranscript).trim();
-    
-    if (!combinedText) {
-      return;
-    }
+    const newShabadId = response.results[0].shabad_id;
+    console.log('[CONFIRMATION] Received shabadId:', newShabadId);
 
-    setIsFiltering(true);
-    
+  // 🟡 FIRST DETECTION
+if (previousShabadId === null) {
+  console.log('[CONFIRMATION] 🟡 First detection');
+  console.log('[CONFIRMATION] Storing previousShabadId:', newShabadId);
+
+  setPreviousShabadId(newShabadId);
+ 
+  transcriptionSentRef.current = false;
+  wordCountTriggeredRef.current = false;
+  setIsProcessing(false);
+  return;
+}
+
+// 🔵 SECOND DETECTION RECEIVED
+console.log('[CONFIRMATION] 🔵 Second detection received');
+console.log('[CONFIRMATION] Previous:', previousShabadId);
+console.log('[CONFIRMATION] New:', newShabadId);
+
+// 🟢 MATCH CONFIRMED
+if (previousShabadId === newShabadId) {
+  console.log('[CONFIRMATION] ✅ MATCH CONFIRMED');
+  console.log('[CONFIRMATION] ShabadId confirmed:', newShabadId);
+
+  setLastSggsMatchFound(response.sggs_match_found ?? null);
+  setLastBestSggsMatch(response.best_sggs_match ?? null);
+
+  if (
+    !shabads.some(s => s.shabad_id === newShabadId) &&
+    !shabadsBeingFetched.current.has(newShabadId)
+  ) {
+    shabadsBeingFetched.current.add(newShabadId);
     try {
-      // Count words on the already-filtered text from speech recognition
-      const wordCount = combinedText.split(/\s+/).filter(word => word.length > 0).length;
-
-      console.log('[App] Pre-filtered combined text:', combinedText);
-      console.log('[App] Word count:', wordCount);
-
-      // Send transcription only if text has 8+ words (and other conditions met)
-      if (wordCount >= 8 && !wordCountTriggeredRef.current && !shabadsLoadedRef.current && !transcriptionSentRef.current) {
-        wordCountTriggeredRef.current = true; // Mark that we've triggered the 8+ word condition
-        
-        console.log('[App] Triggering API call with pre-filtered text');
-        sendTranscription(combinedText, 0.8); // Send pre-filtered text to API
-      }
+      const shabadData = await banidbService.getFullShabad(newShabadId);
+      setShabads(prev => [...prev, shabadData]);
+    } catch (err) {
+      console.error('Error fetching full shabad:', err);
     } finally {
-      setIsFiltering(false);
+      shabadsBeingFetched.current.delete(newShabadId);
     }
-  }, [transcribedText, interimTranscript, sendTranscription, noSpeechCount, isFiltering]);
+  }
+
+  console.log('[CONFIRMATION] 🔁 Resetting confirmation cycle');
+
+  setPreviousShabadId(null);
+  transcriptionSentRef.current = false;
+  wordCountTriggeredRef.current = false;
+} 
+// 🔴 MISMATCH
+else {
+  console.log('[CONFIRMATION] ❌ Mismatch detected');
+  console.log('[CONFIRMATION] Replacing previousShabadId with:', newShabadId);
+
+  setPreviousShabadId(newShabadId);
+
+  transcriptionSentRef.current = false;
+  wordCountTriggeredRef.current = false;
+}
+
+  } catch (err) {
+    console.error('Transcription error:', err);
+    setUserMessage('Failed to process transcription');
+    transcriptionSentRef.current = false;
+    wordCountTriggeredRef.current = false;
+  } finally {
+    setIsProcessing(false);
+  }
+}, [
+  shabads,
+  searchTriggered,
+  isProcessing,
+  noSpeechCount,
+  previousShabadId
+]);
+
+
+  useEffect(() => {
+  if (noSpeechCount >= 3) return;
+  
+  const combinedText = (transcribedText + ' ' + interimTranscript).trim();
+  if (!combinedText) return;
+
+  const words = combinedText.split(/\s+/).filter(Boolean);
+  const totalWords = words.length;
+
+  console.log('[App] Total words:', totalWords);
+  console.log('[App] Already processed:', processedWordCountRef.current);
+
+  // 🔥 Only send if we have 8 NEW words
+  if (totalWords - processedWordCountRef.current >= 8) {
+
+    const nextEight = words.slice(
+      processedWordCountRef.current,
+      processedWordCountRef.current + 8
+    );
+
+    const batchText = nextEight.join(' ');
+
+    console.log('🚀 Sending NEW 8 words:', batchText);
+
+    processedWordCountRef.current += 8;
+
+    sendTranscription(batchText, 0.8);
+  }
+
+}, [
+  transcribedText,
+  interimTranscript,
+  sendTranscription,
+  noSpeechCount,
+  
+]);
 
   // Handle speech recognition errors
   useEffect(() => {
@@ -175,6 +210,7 @@ function App() {
       transcriptionSentRef.current = false;
       wordCountTriggeredRef.current = false;
       shabadsLoadedRef.current = false;
+      
       
       // Clear all subtitle and match state immediately
       setSubtitleText('');
@@ -238,6 +274,7 @@ function App() {
     shabadsLoadedRef.current = false;
     transcriptionSentRef.current = false; // Reset transcription sent flag
     wordCountTriggeredRef.current = false; // Reset word count trigger flag
+    processedWordCountRef.current = 0; // Reset processed word count
   }, [resetTranscription]);
 
   // Automatically start speech recognition on mount - SpeechRecognitionManager handles all restarts internally
@@ -360,4 +397,4 @@ function App() {
   );
 }
 
-export default App; 
+export default App;     
