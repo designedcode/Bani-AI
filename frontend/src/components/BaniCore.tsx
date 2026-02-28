@@ -23,11 +23,14 @@ function BaniCore({ mode }: BaniCoreProps) {
     const [showLoader, setShowLoader] = useState(true);
     const [userMessage, setUserMessage] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
+    const [previousShabadId, setPreviousShabadId] = useState<number | null>(null); // kirtan two-step confirmation
 
     const shabadsBeingFetched = useRef<Set<number>>(new Set());
-    const shabadsLoadedRef = useRef(false); // Track if shabads are loaded
-    const transcriptionSentRef = useRef(false); // Track if we've already sent a transcription
-    const wordCountTriggeredRef = useRef(false); // Track if 8+ words have been reached
+    const shabadsLoadedRef = useRef(false);
+    const transcriptionSentRef = useRef(false);
+    const wordCountTriggeredRef = useRef(false); // paath: single 8-word send
+    const processedWordCountRef = useRef(0); // kirtan: words already sent (first 8, then next 8, ...)
+    const kirtanConfirmedRef = useRef(false); // kirtan: stop sending after match confirmed
     const [subtitleText, setSubtitleText] = useState('');
     const [showMatchedSubtitle, setShowMatchedSubtitle] = useState(false);
     const [isFiltering, setIsFiltering] = useState(false);
@@ -47,43 +50,89 @@ function BaniCore({ mode }: BaniCoreProps) {
         sacredWordOverlay
     } = useSpeechRecognition(shabads.length > 0);
 
-    // Simple function to send transcription data via HTTP (no debouncing)
+    // Send transcription: kirtan = two-step confirmation; paath = single send and show
     const sendTranscription = useCallback(async (text: string, confidence: number) => {
-        // Don't send if max no-speech errors reached
-        if (noSpeechCount >= 3) {
-            return;
-        }
-
-        // Don't send if we've already sent a transcription successfully
-        if (transcriptionSentRef.current) {
-            return;
-        }
-
-        // Don't send if already processing
-        if (isProcessing) {
-            return;
-        }
-
-        // IMPORTANT: Don't process transcription if we already have shabads loaded
-        if (shabadsLoadedRef.current || searchTriggered) {
-            return;
-        }
+        if (noSpeechCount >= 3) return;
+        if (transcriptionSentRef.current) return;
+        if (isProcessing) return;
+        if (mode === 'kirtan' && kirtanConfirmedRef.current) return;
+        // In kirtan we keep sending for second detection; in paath stop once shabads are loaded
+        if (mode !== 'kirtan' && (shabadsLoadedRef.current || searchTriggered)) return;
 
         try {
             setIsProcessing(true);
-
-            // Mark that we're sending a transcription to prevent duplicates
             transcriptionSentRef.current = true;
 
             const response = await transcriptionService.transcribeAndSearch(text, confidence);
 
-            // Update state with response - only keep what we actually use
-            if (response.results && response.results.length > 0) {
-                setLastSggsMatchFound(response.sggs_match_found);
-                setLastBestSggsMatch(response.best_sggs_match);
+            if (!response.results || response.results.length === 0) {
+                transcriptionSentRef.current = false;
+                if (mode === 'paath') wordCountTriggeredRef.current = false;
+                setIsProcessing(false);
+                return;
+            }
 
-                // Fetch full shabad if not already loaded
-                const newShabadId = response.results[0].shabad_id;
+            const newShabadId = response.results[0].shabad_id;
+
+            if (mode === 'kirtan') {
+                // ---- KIRTAN: two-step confirmation ----
+                if (previousShabadId === null) {
+                    // First detection: show shabad immediately, store ID, wait for next 8 words
+                    setPreviousShabadId(newShabadId);
+                    setLastSggsMatchFound(response.sggs_match_found ?? null);
+                    setLastBestSggsMatch(response.best_sggs_match ?? null);
+                    if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
+                        shabadsBeingFetched.current.add(newShabadId);
+                        try {
+                            const shabadData = await banidbService.getFullShabad(newShabadId);
+                            setShabads(prev => [...prev, shabadData]);
+                        } catch (err) {
+                            console.error('Error fetching full shabad:', err);
+                        } finally {
+                            shabadsBeingFetched.current.delete(newShabadId);
+                        }
+                    }
+                } else {
+                    // Second detection (or onward)
+                    if (previousShabadId === newShabadId) {
+                        // Match confirmed: stop sending until reset
+                        kirtanConfirmedRef.current = true;
+                        setPreviousShabadId(null);
+                        setLastSggsMatchFound(response.sggs_match_found ?? null);
+                        setLastBestSggsMatch(response.best_sggs_match ?? null);
+                        if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
+                            shabadsBeingFetched.current.add(newShabadId);
+                            try {
+                                const shabadData = await banidbService.getFullShabad(newShabadId);
+                                setShabads(prev => [...prev, shabadData]);
+                            } catch (err) {
+                                console.error('Error fetching full shabad:', err);
+                            } finally {
+                                shabadsBeingFetched.current.delete(newShabadId);
+                            }
+                        }
+                    } else {
+                        // Mismatch: show new shabad, set as new previous, continue second-detection flow
+                        setPreviousShabadId(newShabadId);
+                        setLastSggsMatchFound(response.sggs_match_found ?? null);
+                        setLastBestSggsMatch(response.best_sggs_match ?? null);
+                        if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
+                            shabadsBeingFetched.current.add(newShabadId);
+                            try {
+                                const shabadData = await banidbService.getFullShabad(newShabadId);
+                                setShabads(prev => [...prev, shabadData]);
+                            } catch (err) {
+                                console.error('Error fetching full shabad:', err);
+                            } finally {
+                                shabadsBeingFetched.current.delete(newShabadId);
+                            }
+                        }
+                    }
+                }
+            } else {
+                // ---- PAATH: single send and show ----
+                setLastSggsMatchFound(response.sggs_match_found ?? null);
+                setLastBestSggsMatch(response.best_sggs_match ?? null);
                 if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
                     shabadsBeingFetched.current.add(newShabadId);
                     try {
@@ -96,63 +145,59 @@ function BaniCore({ mode }: BaniCoreProps) {
                     }
                 }
             }
+
+            transcriptionSentRef.current = false;
+            if (mode === 'paath') wordCountTriggeredRef.current = false;
         } catch (err) {
             console.error('Transcription error:', err);
-
-            // Check if this is a "no results" error that will trigger page refresh
             if (err instanceof Error && err.message.includes('No results found - page will refresh')) {
-                // Don't show error message, just let the page refresh happen
                 setUserMessage('No results found. Refreshing...');
             } else {
                 setUserMessage('Failed to process transcription');
-                // Reset the flag on error so user can try again
-                transcriptionSentRef.current = false;
-                wordCountTriggeredRef.current = false;
             }
+            transcriptionSentRef.current = false;
+            wordCountTriggeredRef.current = false;
         } finally {
             setIsProcessing(false);
         }
-    }, [shabads, searchTriggered, isProcessing, noSpeechCount]);
+    }, [shabads, searchTriggered, isProcessing, noSpeechCount, mode, previousShabadId]);
 
-    // Handle speech recognition results and trigger transcription
+    // Trigger transcription: kirtan = first 8 words then next 8; paath = single 8-word send
     useEffect(() => {
-        // Don't process transcription if max no-speech errors reached
-        if (noSpeechCount >= 3) {
-            return;
-        }
+        if (noSpeechCount >= 3) return;
+        if (isFiltering) return;
 
-        // Don't process if currently filtering
-        if (isFiltering) {
-            return;
-        }
-
-        // Use pre-filtered text from speech recognition hook
         const combinedText = (transcribedText + ' ' + interimTranscript).trim();
-
-        if (!combinedText) {
-            return;
-        }
+        if (!combinedText) return;
 
         setIsFiltering(true);
 
         try {
-            // Count words on the already-filtered text from speech recognition
-            const wordCount = combinedText.split(/\s+/).filter(word => word.length > 0).length;
+            const words = combinedText.split(/\s+/).filter(Boolean);
+            const totalWords = words.length;
 
-            console.log('[BaniCore] Pre-filtered combined text:', combinedText);
-            console.log('[BaniCore] Word count:', wordCount);
-
-            // Send transcription only if text has 8+ words (and other conditions met)
-            if (wordCount >= 8 && !wordCountTriggeredRef.current && !shabadsLoadedRef.current && !transcriptionSentRef.current) {
-                wordCountTriggeredRef.current = true; // Mark that we've triggered the 8+ word condition
-
-                console.log('[BaniCore] Triggering API call with pre-filtered text');
-                sendTranscription(combinedText, 0.8); // Send pre-filtered text to API
+            if (mode === 'kirtan') {
+                // Stop sending after a match is confirmed; only send while waiting for second detection
+                if (!kirtanConfirmedRef.current && totalWords - processedWordCountRef.current >= 8) {
+                    const nextEight = words.slice(
+                        processedWordCountRef.current,
+                        processedWordCountRef.current + 8
+                    );
+                    const batchText = nextEight.join(' ');
+                    processedWordCountRef.current += 8;
+                    sendTranscription(batchText, 0.8);
+                }
+            } else {
+                // Paath: single send when 8+ words
+                if (totalWords >= 8 && !wordCountTriggeredRef.current && !shabadsLoadedRef.current && !transcriptionSentRef.current) {
+                    wordCountTriggeredRef.current = true;
+                    sendTranscription(combinedText, 0.8);
+                }
             }
         } finally {
             setIsFiltering(false);
         }
-    }, [transcribedText, interimTranscript, sendTranscription, noSpeechCount, isFiltering]);
+    }, [transcribedText, interimTranscript, sendTranscription, noSpeechCount, isFiltering, mode]);
 
     // Handle speech recognition errors
     useEffect(() => {
@@ -168,23 +213,18 @@ function BaniCore({ mode }: BaniCoreProps) {
     useEffect(() => {
         if (noSpeechCount >= 3 && shabads.length > 0) {
             setShowLoader(true);
-
-            // Clear shabads to force fresh search
             setShabads([]);
-
-            // Aggressively reset ALL transcription-related state
-            resetTranscription(); // Clear all transcribed text
+            resetTranscription();
             transcriptionSentRef.current = false;
             wordCountTriggeredRef.current = false;
+            processedWordCountRef.current = 0;
+            setPreviousShabadId(null);
+            kirtanConfirmedRef.current = false;
             shabadsLoadedRef.current = false;
-
-            // Clear all subtitle and match state immediately
             setSubtitleText('');
             setShowMatchedSubtitle(false);
             setLastSggsMatchFound(null);
             setLastBestSggsMatch(null);
-
-            // Force another clear after a brief delay to ensure state updates
             setTimeout(() => {
                 setSubtitleText('');
                 resetTranscription();
@@ -228,16 +268,18 @@ function BaniCore({ mode }: BaniCoreProps) {
         }
     }, [showLoader, lastSggsMatchFound, lastBestSggsMatch]);
 
-    // Function to reset transcription state (for future use)
     const resetTranscriptionState = useCallback(() => {
         setShabads([]);
-        resetTranscription(); // Use the hook's reset function
+        resetTranscription();
         setLastSggsMatchFound(null);
         setLastBestSggsMatch(null);
         setShowLoader(true);
         shabadsLoadedRef.current = false;
-        transcriptionSentRef.current = false; // Reset transcription sent flag
-        wordCountTriggeredRef.current = false; // Reset word count trigger flag
+        transcriptionSentRef.current = false;
+        wordCountTriggeredRef.current = false;
+        processedWordCountRef.current = 0;
+        setPreviousShabadId(null);
+        kirtanConfirmedRef.current = false;
     }, [resetTranscription]);
 
     // Automatically start speech recognition on mount - SpeechRecognitionManager handles all restarts internally

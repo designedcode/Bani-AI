@@ -47,7 +47,7 @@ class SpeechRecognitionManager {
       this.emitError('Speech recognition not supported in this browser');
       return false;
     }
-
+    
     // Clean up existing recognition
     if (this.recognition) {
       try {

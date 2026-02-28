@@ -255,7 +255,6 @@ async def transcribe_and_search(request: TranscriptionRequest) -> TranscriptionR
     )
 
 
-
 @app.get("/api/test-database-search")
 async def test_database_search_endpoint(query: str):
     """Test endpoint to check database fuzzy search functionality"""

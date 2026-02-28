@@ -1,7 +1,5 @@
 // Transcription service for REST API communication
 
-// Transcription service for REST API communication
-
 export interface TranscriptionRequest {
   text: string;
   confidence: number;
@@ -37,27 +35,35 @@ class TranscriptionService {
   private sessionId: string;
 
   constructor() {
-    this.baseUrl = process.env.REACT_APP_API_URL || 'https://bani-ai.onrender.com';
+    this.baseUrl =
+      process.env.REACT_APP_API_URL || "https://bani-ai.onrender.com";
     this.sessionId = this.generateSessionId();
   }
 
   private generateSessionId(): string {
-    return `session_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+    return `session_${Date.now()}_${Math.random()
+      .toString(36)
+      .substring(2, 11)}`;
   }
 
-  async transcribeAndSearch(text: string, confidence: number): Promise<FullTranscriptionResponse> {
+  async transcribeAndSearch(
+    text: string,
+    confidence: number
+  ): Promise<FullTranscriptionResponse> {
+
+    console.log("🎤 Sending to backend:", text);
+
     const request: TranscriptionRequest = {
       text,
       confidence,
-      session_id: this.sessionId
+      session_id: this.sessionId,
     };
 
     try {
-      // Step 1: Get SGGS fuzzy match and shabad_id from backend
       const response = await fetch(`${this.baseUrl}/api/transcribe`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify(request),
       });
@@ -68,56 +74,39 @@ class TranscriptionService {
 
       const backendData: TranscriptionResponse = await response.json();
 
-      // Step 2: Create results directly from backend shabad_id (no BaniDB search needed)
+      console.log("📥 Backend Shabad ID:", backendData.shabad_id);
+
       let results: SearchResult[] = [];
 
       if (backendData.sggs_match_found && backendData.shabad_id) {
-        console.log(`Using shabad_id directly: ${backendData.shabad_id}`);
-        // Create a result object with the shabad_id from backend
-        results = [{
-          gurmukhi_text: backendData.best_sggs_match,
-          english_translation: "", // Will be populated when full shabad is fetched
-          verse_id: 0, // Not needed since we have shabad_id
-          shabad_id: backendData.shabad_id,
-          source: "",
-          writer: "",
-          raag: ""
-        }];
-      } else {
-        console.log(`No good SGGS match found - no results`);
-      }
-
-      // If no results found, refresh the page
-      if (results.length === 0) {
-        console.log('No transcription results found, refreshing page...');
-        setTimeout(() => {
-          window.location.reload();
-        }, 1000); // Small delay to show any loading state
-        throw new Error('No results found - page will refresh');
+        results = [
+          {
+            gurmukhi_text: backendData.best_sggs_match,
+            english_translation: "",
+            verse_id: 0,
+            shabad_id: backendData.shabad_id,
+            source: "",
+            writer: "",
+            raag: "",
+          },
+        ];
       }
 
       return {
         ...backendData,
-        results
+        results,
       };
+
     } catch (error) {
-      console.error('Transcription service error:', error);
+      console.error("❌ Transcription service error:", error);
       throw error;
     }
   }
 
-
-
-
-
-  getSessionId(): string {
-    return this.sessionId;
-  }
-
   resetSession(): void {
+    console.log("🔄 Resetting Session");
     this.sessionId = this.generateSessionId();
   }
 }
 
-// Export singleton instance
 export const transcriptionService = new TranscriptionService();
