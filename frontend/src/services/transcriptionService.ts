@@ -46,11 +46,10 @@ class TranscriptionService {
       .substring(2, 11)}`;
   }
 
-  // 🚀 APP now sends EXACTLY 8 words per call
   async transcribeAndSearch(
     text: string,
     confidence: number
-  ): Promise<FullTranscriptionResponse | null> {
+  ): Promise<FullTranscriptionResponse> {
 
     console.log("🎤 Sending to backend:", text);
 

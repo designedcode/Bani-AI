@@ -1,0 +1,569 @@
+diff --git a/backend/main.py b/backend/main.py
+index 6dd9a73..66eab48 100644
+--- a/backend/main.py
++++ b/backend/main.py
+@@ -1,3 +1,5 @@
++
++
+ from fastapi import FastAPI
+ from fastapi.middleware.cors import CORSMiddleware
+ from pydantic import BaseModel
+@@ -69,8 +71,6 @@ async def load_database_verses():
+     else:
+         logger.warning(f"Database not found at {DATABASE_PATH}. Fuzzy search will be disabled.")
+ 
+-
+-
+ @lru_cache(maxsize=1000)
+ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
+     """Fuzzy search with sliding windows using database verses - BATCH OPTIMIZED"""
+@@ -123,6 +123,7 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
+         windows = []
+         
+         # Single-verse: the top verse
++  
+         windows.append((verse_idx, verse_idx, "single"))
+         
+         # Double-verse forward: (i, i+1)
+@@ -189,7 +190,7 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
+     
+     logger.info("DEBUG SEARCH: Step 4 - Final window results (top 5):")
+     for i, (verse_text, shabad_id, score, window_type, start_idx, end_idx, orig_idx) in enumerate(window_candidates[:5], 1):
+-        logger.info(f"DEBUG SEARCH:   {i}. {window_type} ({start_idx}-{end_idx}) from original verse {orig_idx}: {score:.2f} , (ShabadID: {shabad_id}) | '{verse_text[:60]}...'")
++      logger.info(f"DEBUG SEARCH:   {i}. {window_type} ({start_idx}-{end_idx}) from original verse {orig_idx}: {score:.2f} , (ShabadID: {shabad_id}) | '{verse_text[:60]}...'")
+     
+     logger.info(f"DEBUG SEARCH: FINAL RESULT - Best window: {best_type} ({best_start}-{best_end}) with score {best_score:.2f} , Returning ShabadID {best_shabad_id} with verse: '{best_verse}'")
+ 
+@@ -202,8 +203,6 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
+         logger.info("DEBUG SEARCH: No matches found above threshold")
+         return None, None, None
+ 
+-
+-
+ @app.get("/")
+ async def root():
+     return {"message": "Bani AI Transcription API"}
+@@ -253,9 +252,7 @@ async def transcribe_and_search(request: TranscriptionRequest) -> TranscriptionR
+         best_sggs_score=best_sggs_score,
+         timestamp=time.time()
+     )
+-
+-
+-
++    
+ @app.get("/api/test-database-search")
+ async def test_database_search_endpoint(query: str):
+     """Test endpoint to check database fuzzy search functionality"""
+diff --git a/backend/requirements.txt b/backend/requirements.txt
+index b03ff2a..001eeba 100644
+--- a/backend/requirements.txt
++++ b/backend/requirements.txt
+@@ -23,5 +23,5 @@ sniffio==1.3.1
+ starlette==0.27.0
+ typing_extensions==4.14.1
+ uvicorn==0.24.0
+-uvloop==0.21.0
++#uvloop==0.21.0
+ watchfiles==1.1.0
+diff --git a/backend/test_enhanced_fuzzy.py b/backend/test_enhanced_fuzzy.py
+index 765ad4c..053b35c 100644
+--- a/backend/test_enhanced_fuzzy.py
++++ b/backend/test_enhanced_fuzzy.py
+@@ -2,7 +2,6 @@
+ """
+ Test script for enhanced fuzzy word matching in inverted index
+ """
+-
+ import asyncio
+ import sys
+ import os
+diff --git a/backend/uninstall.txt b/backend/uninstall.txt
+new file mode 100644
+index 0000000..e69de29
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index ae4aa7d..e9a63ba 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -3,8 +3,332 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+ import ModeSelection from './components/ModeSelection';
+ import BaniCore from './components/BaniCore';
+ import './App.css';
++import FullShabadDisplay from './components/FullShabadDisplay';
++import LoadingOverlay from './components/LoadingOverlay';
++import StickyButtons from './components/StickyButtons';
++import MetadataPills from './components/MetadataPills';
++import SacredWordOverlay from './components/SacredWordOverlay';
++import { transcriptionService } from './services/transcriptionService';
++import { banidbService } from './services/banidbService';
++import { useSpeechRecognition } from './hooks/useSpeechRecognition';
+ 
+ function App() {
++  const [shabads, setShabads] = useState<any[]>([]);
++  const [searchTriggered] = useState(false);
++  const [lastSggsMatchFound, setLastSggsMatchFound] = useState<boolean | null>(null);
++  const [lastBestSggsMatch, setLastBestSggsMatch] = useState<string | null>(null);
++  const [showLoader, setShowLoader] = useState(true);
++  const [userMessage, setUserMessage] = useState('');
++  const [isProcessing, setIsProcessing] = useState(false);
++  const [previousShabadId, setPreviousShabadId] = useState<number | null>(null); //New
++
++  const shabadsBeingFetched = useRef<Set<number>>(new Set());
++  const shabadsLoadedRef = useRef(false); // Track if shabads are loaded
++  const transcriptionSentRef = useRef(false); // Track if we've already sent a transcription
++  const wordCountTriggeredRef = useRef(false); // Track if 8+ words have been reached
++  const processedWordCountRef = useRef(0); // 👈 tracks how many words already sent
++  const [subtitleText, setSubtitleText] = useState('');
++  const [showMatchedSubtitle, setShowMatchedSubtitle] = useState(false);
++  const MATCH_DISPLAY_DELAY = 1800; // ms
++
++  // Use the new speech recognition hook - keep running even when shabads are loaded
++  const {
++    isListening,
++    transcribedText,
++    interimTranscript,
++    error,
++    noSpeechCount,
++    volume,
++    start: startSpeechRecognition,
++    returnToLoadingOverlay,
++    resetTranscription,
++    sacredWordOverlay
++  } = useSpeechRecognition(shabads.length > 0);
++
++  // Simple function to send transcription data via HTTP (no debouncing)
++ const sendTranscription = useCallback(async (text: string, confidence: number) => {
++  if (noSpeechCount >= 3) return;
++  if (transcriptionSentRef.current) return;
++  if (isProcessing) return;
++  if (shabadsLoadedRef.current || searchTriggered) return;
++
++  try {
++    setIsProcessing(true);
++    transcriptionSentRef.current = true;
++
++    const response = await transcriptionService.transcribeAndSearch(text, confidence);
++
++    // 🚫 8 words not ready yet
++    if (!response) {
++      console.log('[App] Waiting for 8 new words...');
++      transcriptionSentRef.current = false;
++      setIsProcessing(false);
++      return;
++    }
++
++    // 🚫 No results returned
++    if (!response.results || response.results.length === 0) {
++      console.log('[CONFIRMATION] No results found.');
++      transcriptionSentRef.current = false;
++      wordCountTriggeredRef.current = false;
++      setIsProcessing(false);
++      return;
++    }
++
++    const newShabadId = response.results[0].shabad_id;
++    console.log('[CONFIRMATION] Received shabadId:', newShabadId);
++
++  // 🟡 FIRST DETECTION
++if (previousShabadId === null) {
++  console.log('[CONFIRMATION] 🟡 First detection');
++  console.log('[CONFIRMATION] Storing previousShabadId:', newShabadId);
++
++  setPreviousShabadId(newShabadId);
++ 
++  transcriptionSentRef.current = false;
++  wordCountTriggeredRef.current = false;
++  setIsProcessing(false);
++  return;
++}
++
++// 🔵 SECOND DETECTION RECEIVED
++console.log('[CONFIRMATION] 🔵 Second detection received');
++console.log('[CONFIRMATION] Previous:', previousShabadId);
++console.log('[CONFIRMATION] New:', newShabadId);
++
++// 🟢 MATCH CONFIRMED
++if (previousShabadId === newShabadId) {
++  console.log('[CONFIRMATION] ✅ MATCH CONFIRMED');
++  console.log('[CONFIRMATION] ShabadId confirmed:', newShabadId);
++
++  setLastSggsMatchFound(response.sggs_match_found ?? null);
++  setLastBestSggsMatch(response.best_sggs_match ?? null);
++
++  if (
++    !shabads.some(s => s.shabad_id === newShabadId) &&
++    !shabadsBeingFetched.current.has(newShabadId)
++  ) {
++    shabadsBeingFetched.current.add(newShabadId);
++    try {
++      const shabadData = await banidbService.getFullShabad(newShabadId);
++      setShabads(prev => [...prev, shabadData]);
++    } catch (err) {
++      console.error('Error fetching full shabad:', err);
++    } finally {
++      shabadsBeingFetched.current.delete(newShabadId);
++    }
++  }
++
++  console.log('[CONFIRMATION] 🔁 Resetting confirmation cycle');
++
++  setPreviousShabadId(null);
++  transcriptionSentRef.current = false;
++  wordCountTriggeredRef.current = false;
++} 
++// 🔴 MISMATCH
++else {
++  console.log('[CONFIRMATION] ❌ Mismatch detected');
++  console.log('[CONFIRMATION] Replacing previousShabadId with:', newShabadId);
++
++  setPreviousShabadId(newShabadId);
++
++  transcriptionSentRef.current = false;
++  wordCountTriggeredRef.current = false;
++}
++
++  } catch (err) {
++    console.error('Transcription error:', err);
++    setUserMessage('Failed to process transcription');
++    transcriptionSentRef.current = false;
++    wordCountTriggeredRef.current = false;
++  } finally {
++    setIsProcessing(false);
++  }
++}, [
++  shabads,
++  searchTriggered,
++  isProcessing,
++  noSpeechCount,
++  previousShabadId
++]);
++
++
++  useEffect(() => {
++  if (noSpeechCount >= 3) return;
++  
++  const combinedText = (transcribedText + ' ' + interimTranscript).trim();
++  if (!combinedText) return;
++
++  const words = combinedText.split(/\s+/).filter(Boolean);
++  const totalWords = words.length;
++
++  console.log('[App] Total words:', totalWords);
++  console.log('[App] Already processed:', processedWordCountRef.current);
++
++  // 🔥 Only send if we have 8 NEW words
++  if (totalWords - processedWordCountRef.current >= 8) {
++
++    const nextEight = words.slice(
++      processedWordCountRef.current,
++      processedWordCountRef.current + 8
++    );
++
++    const batchText = nextEight.join(' ');
++
++    console.log('🚀 Sending NEW 8 words:', batchText);
++
++    processedWordCountRef.current += 8;
++
++    sendTranscription(batchText, 0.8);
++  }
++
++}, [
++  transcribedText,
++  interimTranscript,
++  sendTranscription,
++  noSpeechCount,
++  
++]);
++
++  // Handle speech recognition errors
++  useEffect(() => {
++    if (error) {
++      setUserMessage(`Speech error: ${error}`);
++    } else if (!isProcessing) {
++      // Only clear message if not processing to avoid clearing processing messages
++      setUserMessage('');
++    }
++  }, [error, isProcessing]);
++
++  // Handle returning to loading overlay when max no-speech errors reached
++  useEffect(() => {
++    if (noSpeechCount >= 3 && shabads.length > 0) {
++      setShowLoader(true);
++      
++      // Clear shabads to force fresh search
++      setShabads([]);
++      
++      // Aggressively reset ALL transcription-related state
++      resetTranscription(); // Clear all transcribed text
++      transcriptionSentRef.current = false;
++      wordCountTriggeredRef.current = false;
++      shabadsLoadedRef.current = false;
++      
++      
++      // Clear all subtitle and match state immediately
++      setSubtitleText('');
++      setShowMatchedSubtitle(false);
++      setLastSggsMatchFound(null);
++      setLastBestSggsMatch(null);
++      
++      // Force another clear after a brief delay to ensure state updates
++      setTimeout(() => {
++        setSubtitleText('');
++        resetTranscription();
++      }, 10);
++    }
++  }, [noSpeechCount, shabads.length, resetTranscription]);
++
++  // Hide loader as soon as a shabad is found
++  useEffect(() => {
++    if (shabads.length > 0) {
++      setShowLoader(false);
++      shabadsLoadedRef.current = true; // Update ref when shabads are loaded
++    }
++  }, [shabads]);
++
++  // Show live transcription as subtitle during loading (FILTERED)
++  useEffect(() => {
++    // Immediately clear subtitle if max no-speech errors reached
++    if (noSpeechCount >= 3) {
++      setSubtitleText('');
++      return;
++    }
++    
++    if (showLoader && !showMatchedSubtitle && !shabadsLoadedRef.current && noSpeechCount < 3) {
++      // Use pre-filtered text from speech recognition hook
++      const subtitle = (transcribedText + ' ' + interimTranscript).trim();
++      setSubtitleText(subtitle);
++    }
++  }, [transcribedText, interimTranscript, showLoader, showMatchedSubtitle, noSpeechCount]);
++
++  // When SGGS match is found, show matched text as subtitle, then transition
++  useEffect(() => {
++    if (showLoader && lastSggsMatchFound && lastBestSggsMatch) {
++      setShowMatchedSubtitle(true);
++      setSubtitleText(lastBestSggsMatch);
++      const timer = setTimeout(() => {
++        setShowLoader(false);
++        setShowMatchedSubtitle(false);
++      }, MATCH_DISPLAY_DELAY);
++      return () => clearTimeout(timer);
++    }
++  }, [showLoader, lastSggsMatchFound, lastBestSggsMatch]);
++
++
++
++  // Function to reset transcription state (for future use)
++  const resetTranscriptionState = useCallback(() => {
++    setShabads([]);
++    resetTranscription(); // Use the hook's reset function
++    setLastSggsMatchFound(null);
++    setLastBestSggsMatch(null);
++    setShowLoader(true);
++    shabadsLoadedRef.current = false;
++    transcriptionSentRef.current = false; // Reset transcription sent flag
++    wordCountTriggeredRef.current = false; // Reset word count trigger flag
++    processedWordCountRef.current = 0; // Reset processed word count
++  }, [resetTranscription]);
++
++  // Automatically start speech recognition on mount - SpeechRecognitionManager handles all restarts internally
++  useEffect(() => {
++    startSpeechRecognition();
++  }, [startSpeechRecognition]);
++
++  // Expose reset function for development/testing
++  useEffect(() => {
++    if (process.env.NODE_ENV === 'development') {
++      (window as any).resetBaniAI = resetTranscriptionState;
++      (window as any).returnToLoading = () => {
++        setShowLoader(true);
++        returnToLoadingOverlay();
++      };
++    }
++  }, [resetTranscriptionState, returnToLoadingOverlay]);
++
++  // Callback to fetch next shabad
++  const handleNeedNextShabad = useCallback(async () => {
++    const lastShabad = shabads[shabads.length - 1];
++    const nextShabadId = lastShabad?.navigation?.next;
++    console.log(`[PAGINATION] Attempting to fetch next shabad. Current: ${lastShabad?.shabad_id}, Next: ${nextShabadId}`);
++
++    if (
++      nextShabadId &&
++      !shabads.some(s => s.shabad_id === nextShabadId) &&
++      !shabadsBeingFetched.current.has(nextShabadId)
++    ) {
++      console.log(`[PAGINATION] Fetching shabad ${nextShabadId}`);
++      shabadsBeingFetched.current.add(nextShabadId);
++      try {
++        const data = await banidbService.getFullShabad(nextShabadId);
++        setShabads(prev => {
++          console.log(`[PAGINATION] Successfully fetched shabad ${nextShabadId}, total shabads: ${prev.length + 1}`);
++          return [...prev, data];
++        });
++      } catch (err) {
++        console.error('Error fetching next shabad:', err);
++      } finally {
++        shabadsBeingFetched.current.delete(nextShabadId);
++      }
++    } else {
++      console.log(`[PAGINATION] Skipping fetch - nextShabadId: ${nextShabadId}, already exists: ${shabads.some(s => s.shabad_id === nextShabadId)}, being fetched: ${shabadsBeingFetched.current.has(nextShabadId)}`);
++    }
++  }, [shabads]);
++
++=======
++
++function App() {
++
+   return (
+     <Router>
+       <Routes>
+@@ -16,4 +340,4 @@ function App() {
+   );
+ }
+ 
+-export default App;
++export default App;     
+diff --git a/frontend/src/services/speechRecognitionManager.ts b/frontend/src/services/speechRecognitionManager.ts
+index c1b6362..ca8da77 100644
+--- a/frontend/src/services/speechRecognitionManager.ts
++++ b/frontend/src/services/speechRecognitionManager.ts
+@@ -47,7 +47,7 @@ class SpeechRecognitionManager {
+       this.emitError('Speech recognition not supported in this browser');
+       return false;
+     }
+-
++    
+     // Clean up existing recognition
+     if (this.recognition) {
+       try {
+diff --git a/frontend/src/services/transcriptionService.ts b/frontend/src/services/transcriptionService.ts
+index e40f047..9325c0b 100644
+--- a/frontend/src/services/transcriptionService.ts
++++ b/frontend/src/services/transcriptionService.ts
+@@ -1,7 +1,5 @@
+ // Transcription service for REST API communication
+ 
+-// Transcription service for REST API communication
+-
+ export interface TranscriptionRequest {
+   text: string;
+   confidence: number;
+@@ -37,27 +35,36 @@ class TranscriptionService {
+   private sessionId: string;
+ 
+   constructor() {
+-    this.baseUrl = process.env.REACT_APP_API_URL || 'https://bani-ai.onrender.com';
++    this.baseUrl =
++      process.env.REACT_APP_API_URL || "https://bani-ai.onrender.com";
+     this.sessionId = this.generateSessionId();
+   }
+ 
+   private generateSessionId(): string {
+-    return `session_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
++    return `session_${Date.now()}_${Math.random()
++      .toString(36)
++      .substring(2, 11)}`;
+   }
+ 
+-  async transcribeAndSearch(text: string, confidence: number): Promise<FullTranscriptionResponse> {
++  // 🚀 APP now sends EXACTLY 8 words per call
++  async transcribeAndSearch(
++    text: string,
++    confidence: number
++  ): Promise<FullTranscriptionResponse | null> {
++
++    console.log("🎤 Sending to backend:", text);
++
+     const request: TranscriptionRequest = {
+       text,
+       confidence,
+-      session_id: this.sessionId
++      session_id: this.sessionId,
+     };
+ 
+     try {
+-      // Step 1: Get SGGS fuzzy match and shabad_id from backend
+       const response = await fetch(`${this.baseUrl}/api/transcribe`, {
+-        method: 'POST',
++        method: "POST",
+         headers: {
+-          'Content-Type': 'application/json',
++          "Content-Type": "application/json",
+         },
+         body: JSON.stringify(request),
+       });
+@@ -68,56 +75,39 @@ class TranscriptionService {
+ 
+       const backendData: TranscriptionResponse = await response.json();
+ 
+-      // Step 2: Create results directly from backend shabad_id (no BaniDB search needed)
++      console.log("📥 Backend Shabad ID:", backendData.shabad_id);
++
+       let results: SearchResult[] = [];
+ 
+       if (backendData.sggs_match_found && backendData.shabad_id) {
+-        console.log(`Using shabad_id directly: ${backendData.shabad_id}`);
+-        // Create a result object with the shabad_id from backend
+-        results = [{
+-          gurmukhi_text: backendData.best_sggs_match,
+-          english_translation: "", // Will be populated when full shabad is fetched
+-          verse_id: 0, // Not needed since we have shabad_id
+-          shabad_id: backendData.shabad_id,
+-          source: "",
+-          writer: "",
+-          raag: ""
+-        }];
+-      } else {
+-        console.log(`No good SGGS match found - no results`);
+-      }
+-
+-      // If no results found, refresh the page
+-      if (results.length === 0) {
+-        console.log('No transcription results found, refreshing page...');
+-        setTimeout(() => {
+-          window.location.reload();
+-        }, 1000); // Small delay to show any loading state
+-        throw new Error('No results found - page will refresh');
++        results = [
++          {
++            gurmukhi_text: backendData.best_sggs_match,
++            english_translation: "",
++            verse_id: 0,
++            shabad_id: backendData.shabad_id,
++            source: "",
++            writer: "",
++            raag: "",
++          },
++        ];
+       }
+ 
+       return {
+         ...backendData,
+-        results
++        results,
+       };
++
+     } catch (error) {
+-      console.error('Transcription service error:', error);
++      console.error("❌ Transcription service error:", error);
+       throw error;
+     }
+   }
+ 
+-
+-
+-
+-
+-  getSessionId(): string {
+-    return this.sessionId;
+-  }
+-
+   resetSession(): void {
++    console.log("🔄 Resetting Session");
+     this.sessionId = this.generateSessionId();
+   }
+ }
+ 
+-// Export singleton instance
+ export const transcriptionService = new TranscriptionService();
+\ No newline at end of file
