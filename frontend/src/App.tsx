@@ -1,4 +1,7 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import ModeSelection from './components/ModeSelection';
+import BaniCore from './components/BaniCore';
 import './App.css';
 import FullShabadDisplay from './components/FullShabadDisplay';
 import LoadingOverlay from './components/LoadingOverlay';
@@ -322,78 +325,18 @@ else {
     }
   }, [shabads]);
 
+=======
+
+function App() {
+
   return (
-    <>
-      <LoadingOverlay 
-        className={showLoader ? '' : 'fade-out'} 
-        volume={volume} 
-        subtitle={showLoader ? subtitleText : undefined}
-      />
-      <SacredWordOverlay
-        isVisible={sacredWordOverlay.isVisible}
-        sacredWord={sacredWordOverlay.sacredWord}
-      />
-      <div style={{ display: showLoader ? 'none' : 'block' }}>
-        <div className="App">
-          <header className="App-header">
-            <h1>ੴ Bani AI</h1>
-            <p>Real-time Punjabi Audio Transcription & BaniDB Search</p>
-            {userMessage && (
-              <div className="user-message" style={{ color: '#ffb347', fontWeight: 600, margin: '1rem 0' }}>
-                {userMessage}
-              </div>
-            )}
-            <div className="connection-status">
-              <span className={`status-indicator ${isProcessing ? 'connecting' : error ? 'disconnected' : 'connected'}`}>
-                {isProcessing ? '🟡' : error ? '🔴' : '🟢'}
-              </span>
-              <span className="status-text">
-                {isProcessing ? 'Processing...' : error ? `Error: ${error}` : isListening ? 'Listening...' : 'Ready for transcription'}
-              </span>
-            </div>
-          </header>
-
-          {/* Sticky Pills + Buttons Row */}
-          {shabads.length > 0 && (
-            <div className="sticky-header-row">
-              <div className="sticky-header-left">
-                <MetadataPills
-                  raag={shabads[0]?.raag}
-                  writer={shabads[0]?.writer}
-                  page={shabads[0]?.page_no}
-                />
-                <StickyButtons />
-              </div>
-            </div>
-          )}
-
-          <main className="App-main">
-            {/* Show Full Shabad box if present */}
-            {shabads.length > 0 && (
-              <div className="panel-header search-results" style={{ marginBottom: '2rem' }}>
-                <FullShabadDisplay
-                  shabads={shabads}
-                  transcribedText={(() => {
-                    // Use pre-filtered text from speech recognition hook
-                    const combined = (transcribedText + ' ' + interimTranscript).trim();
-                    const words = combined.split(/\s+/);
-                    const last4Words = words.slice(-4).join(' ');
-                    return last4Words;
-                  })()}
-                  onNeedNextShabad={handleNeedNextShabad}
-                />
-              </div>
-            )}
-
-            {error && (
-              <div className="error-message">
-                ⚠️ {error}
-              </div>
-            )}
-          </main>
-        </div>
-      </div>
-    </>
+    <Router>
+      <Routes>
+        <Route path="/" element={<ModeSelection />} />
+        <Route path="/kirtan" element={<BaniCore mode="kirtan" />} />
+        <Route path="/paath" element={<BaniCore mode="paath" />} />
+      </Routes>
+    </Router>
   );
 }
 
