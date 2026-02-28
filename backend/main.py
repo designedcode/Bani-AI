@@ -1,5 +1,3 @@
-
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -71,6 +69,8 @@ async def load_database_verses():
     else:
         logger.warning(f"Database not found at {DATABASE_PATH}. Fuzzy search will be disabled.")
 
+
+
 @lru_cache(maxsize=1000)
 def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
     """Fuzzy search with sliding windows using database verses - BATCH OPTIMIZED"""
@@ -123,7 +123,6 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
         windows = []
         
         # Single-verse: the top verse
-  
         windows.append((verse_idx, verse_idx, "single"))
         
         # Double-verse forward: (i, i+1)
@@ -190,7 +189,7 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
     
     logger.info("DEBUG SEARCH: Step 4 - Final window results (top 5):")
     for i, (verse_text, shabad_id, score, window_type, start_idx, end_idx, orig_idx) in enumerate(window_candidates[:5], 1):
-      logger.info(f"DEBUG SEARCH:   {i}. {window_type} ({start_idx}-{end_idx}) from original verse {orig_idx}: {score:.2f} , (ShabadID: {shabad_id}) | '{verse_text[:60]}...'")
+        logger.info(f"DEBUG SEARCH:   {i}. {window_type} ({start_idx}-{end_idx}) from original verse {orig_idx}: {score:.2f} , (ShabadID: {shabad_id}) | '{verse_text[:60]}...'")
     
     logger.info(f"DEBUG SEARCH: FINAL RESULT - Best window: {best_type} ({best_start}-{best_end}) with score {best_score:.2f} , Returning ShabadID {best_shabad_id} with verse: '{best_verse}'")
 
@@ -202,6 +201,8 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
     else:
         logger.info("DEBUG SEARCH: No matches found above threshold")
         return None, None, None
+
+
 
 @app.get("/")
 async def root():
@@ -252,7 +253,8 @@ async def transcribe_and_search(request: TranscriptionRequest) -> TranscriptionR
         best_sggs_score=best_sggs_score,
         timestamp=time.time()
     )
-    
+
+
 @app.get("/api/test-database-search")
 async def test_database_search_endpoint(query: str):
     """Test endpoint to check database fuzzy search functionality"""
