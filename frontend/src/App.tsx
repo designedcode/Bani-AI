@@ -35,6 +35,8 @@ function App() {
     isListening,
     transcribedText,
     interimTranscript,
+    rawTranscribedText,
+    rawInterimTranscript,
     error,
     noSpeechCount,
     volume,
@@ -129,26 +131,26 @@ function App() {
 
     // Use pre-filtered text from speech recognition hook
     const combinedText = (transcribedText + ' ' + interimTranscript).trim();
-    
+
     if (!combinedText) {
       return;
     }
 
     setIsFiltering(true);
-    
+
     try {
-      // Count words on the already-filtered text from speech recognition
-      const wordCount = combinedText.split(/\s+/).filter(word => word.length > 0).length;
+      // Send transcription only if we haven't already triggered the 8+ word condition
+      if (!wordCountTriggeredRef.current && !shabadsLoadedRef.current && !transcriptionSentRef.current) {
+        // Count words on the already-filtered text from speech recognition
+        const wordCount = combinedText.split(/\s+/).filter(word => word.length > 0).length;
 
-      console.log('[App] Pre-filtered combined text:', combinedText);
-      console.log('[App] Word count:', wordCount);
+        // Uncomment for debug if needed: console.log('[App] Pre-filtered combined text:', combinedText, 'Word count:', wordCount);
 
-      // Send transcription only if text has 8+ words (and other conditions met)
-      if (wordCount >= 8 && !wordCountTriggeredRef.current && !shabadsLoadedRef.current && !transcriptionSentRef.current) {
-        wordCountTriggeredRef.current = true; // Mark that we've triggered the 8+ word condition
-        
-        console.log('[App] Triggering API call with pre-filtered text');
-        sendTranscription(combinedText, 0.8); // Send pre-filtered text to API
+        if (wordCount >= 8) {
+          wordCountTriggeredRef.current = true; // Mark that we've triggered the 8+ word condition
+          console.log('[App] Triggering API call with pre-filtered text');
+          sendTranscription(combinedText, 0.8); // Send pre-filtered text to API
+        }
       }
     } finally {
       setIsFiltering(false);
@@ -169,22 +171,22 @@ function App() {
   useEffect(() => {
     if (noSpeechCount >= 3 && shabads.length > 0) {
       setShowLoader(true);
-      
+
       // Clear shabads to force fresh search
       setShabads([]);
-      
+
       // Aggressively reset ALL transcription-related state
       resetTranscription(); // Clear all transcribed text
       transcriptionSentRef.current = false;
       wordCountTriggeredRef.current = false;
       shabadsLoadedRef.current = false;
-      
+
       // Clear all subtitle and match state immediately
       setSubtitleText('');
       setShowMatchedSubtitle(false);
       setLastSggsMatchFound(null);
       setLastBestSggsMatch(null);
-      
+
       // Force another clear after a brief delay to ensure state updates
       setTimeout(() => {
         setSubtitleText('');
@@ -208,13 +210,13 @@ function App() {
       setSubtitleText('');
       return;
     }
-    
+
     if (showLoader && !showMatchedSubtitle && !shabadsLoadedRef.current && noSpeechCount < 3) {
-      // Use pre-filtered text from speech recognition hook
-      const subtitle = (transcribedText + ' ' + interimTranscript).trim();
+      // Use raw text for display as per requirements
+      const subtitle = (rawTranscribedText + ' ' + rawInterimTranscript).trim();
       setSubtitleText(subtitle);
     }
-  }, [transcribedText, interimTranscript, showLoader, showMatchedSubtitle, noSpeechCount]);
+  }, [rawTranscribedText, rawInterimTranscript, showLoader, showMatchedSubtitle, noSpeechCount]);
 
   // When SGGS match is found, show matched text as subtitle, then transition
   useEffect(() => {
@@ -290,14 +292,15 @@ function App() {
 
   return (
     <>
-      <LoadingOverlay 
-        className={showLoader ? '' : 'fade-out'} 
-        volume={volume} 
+      <LoadingOverlay
+        className={showLoader ? '' : 'fade-out'}
+        volume={volume}
         subtitle={showLoader ? subtitleText : undefined}
       />
       <SacredWordOverlay
         isVisible={sacredWordOverlay.isVisible}
         sacredWord={sacredWordOverlay.sacredWord}
+        matchId={sacredWordOverlay.id}
       />
       <div style={{ display: showLoader ? 'none' : 'block' }}>
         <div className="App">
@@ -358,7 +361,7 @@ function App() {
             )}
           </main>
         </div>
-      </div>
+      </div >
     </>
   );
 }

@@ -10,10 +10,11 @@
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   opacity: 0;
   transform: scale(0.95);
   pointer-events: none;
+  will-change: transform, opacity;
 }
 
 .sacred-word-overlay.visible {
@@ -31,7 +32,9 @@
 .sacred-word-content {
   text-align: center;
   color: white;
-  animation: fadeInUp 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: fadeInUp 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  will-change: transform, opacity;
+  transform: translateZ(0);
 }
 
 .sacred-word-symbol {

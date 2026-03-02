@@ -1,30 +1,30 @@
-import { useCallback, useState, useRef, useEffect } from 'react';
-import { detectAndRemoveSacredWords } from '../services/sacredWordDetector';
+import { useCallback, useState, useRef, useEffect, useMemo } from 'react';
+import { flushSync } from 'react-dom';
+import { sacredTrie } from '../services/sacredWordDetector';
+import { StreamingTrieDetector } from '../services/sacredWordTrie';
 
 interface SacredWordDetectionResult {
   match: string;
   displayText: string;
-  rule: any;
-  score: number;
 }
 
 interface DetectionResult {
-  match: SacredWordDetectionResult | null;
-  filteredTranscript: string;
+  filteredFinalTranscript: string;
+  filteredInterimTranscript: string;
 }
 
 interface UseSacredWordDetectionReturn {
-  detectInTranscript: (combinedText: string, context?: 'general' | 'shabad', isDisplayingResults?: boolean) => DetectionResult;
+  detectNewSegment: (segment: string, isFinal: boolean, isDisplayingResults?: boolean) => DetectionResult;
   overlayState: {
     isVisible: boolean;
     sacredWord: string;
+    id: number;
   };
   clearTrackingData: () => void;
 }
 
 // Sacred word pattern categories with their overlay display text
 const SACRED_WORD_CATEGORIES = {
-  // Category 1: Lines 4-5, 16-17, 25-28 - Khalsa Fateh
   KHALSA_FATEH: {
     patterns: [
       'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖ਼ਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫ਼ਤਿਹ',
@@ -38,8 +38,6 @@ const SACRED_WORD_CATEGORIES = {
     ],
     displayText: 'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫਤਿਹ'
   },
-  
-  // Category 2: Lines 7-14 - Mool Mantar
   MOOL_MANTAR: {
     patterns: [
       'ਸਤਿ ਨਾਮੁ ਕਰਤਾ ਪੁਰਖੁ ਨਿਰਭਉ ਨਿਰਵੈਰੁ ਅਕਾਲ ਮੂਰਤਿ ਅਜੂਨੀ ਸੈਭੰ ਗੁਰ ਪ੍ਰਸਾਦਿ',
@@ -53,8 +51,6 @@ const SACRED_WORD_CATEGORIES = {
     ],
     displayText: 'ੴ ਸਤਿ ਨਾਮੁ ਕਰਤਾ ਪੁਰਖੁ ਨਿਰਭਉ ਨਿਰਵੈਰੁ ਅਕਾਲ ਮੂਰਤਿ ਅਜੂਨੀ ਸੈਭੰ ਗੁਰ ਪ੍ਰਸਾਦਿ'
   },
-  
-  // Category 3: Lines 19-22 - Dhan Guru Nanak
   DHAN_GURU_NANAK: {
     patterns: [
       'ਧੰਨ ਗੁਰੂ ਨਾਨਕ',
@@ -64,8 +60,6 @@ const SACRED_WORD_CATEGORIES = {
     ],
     displayText: 'ਧੰਨ ਗੁਰੂ ਨਾਨਕ'
   },
-  
-  // Category 4: Lines 29-30 - Bole So Nihal
   BOLE_SO_NIHAL: {
     patterns: [
       'ਬੋਲੇ ਸੋ ਨਿਹਾਲ ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ',
@@ -76,8 +70,6 @@ const SACRED_WORD_CATEGORIES = {
     ],
     displayText: 'ਬੋਲੇ ਸੋ ਨਿਹਾਲ ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ'
   },
-  
-  // Category 5: Lines 33, 50 - Waheguru
   WAHEGURU: {
     patterns: [
       'ਵਾਹਿਗੁਰੂ',
@@ -85,8 +77,6 @@ const SACRED_WORD_CATEGORIES = {
     ],
     displayText: 'ਵਾਹਿਗੁਰੂ'
   },
-  
-  // Category 6: Lines 35-37, 51-52 - Ik Onkar
   IK_ONKAR: {
     patterns: [
       'ੴ',
@@ -99,192 +89,192 @@ const SACRED_WORD_CATEGORIES = {
   }
 };
 
-// Mool Mantar patterns that should not trigger overlay during search results
 const MOOL_MANTAR_PATTERNS = SACRED_WORD_CATEGORIES.MOOL_MANTAR.patterns;
 
 export function useSacredWordDetection(): UseSacredWordDetectionReturn {
   const [overlayState, setOverlayState] = useState({
     isVisible: false,
-    sacredWord: ''
+    sacredWord: '',
+    id: 0
   });
-  
-  const overlayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const lastMatchRef = useRef<string>('');
-  const shownTextsRef = useRef<Set<string>>(new Set()); // Track texts that have already shown overlay
-  const timerResetCountRef = useRef<Map<string, number>>(new Map()); // Track timer reset count per text
 
-  // Helper function to check if a match is Mool Mantar
+  const overlayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const fadeOutTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const overlayCounterRef = useRef(0);
+  const lastTriggerTimeRef = useRef<number>(0);
+  const lastTriggeredWordRef = useRef<string>('');
+
+  // Streaming state tracking
+  const filteredWordsRef = useRef<string[]>([]);
+  const detectorRef = useRef(new StreamingTrieDetector(sacredTrie));
+
   const isMoolMantar = useCallback((matchText: string): boolean => {
     const normalized = matchText.normalize('NFC');
-    return MOOL_MANTAR_PATTERNS.some(pattern => 
+    return MOOL_MANTAR_PATTERNS.some(pattern =>
       normalized.includes(pattern) || pattern.includes(normalized)
     );
   }, []);
 
-  // Helper function to get the display text for a matched pattern
   const getDisplayTextForPattern = useCallback((matchText: string): string => {
     const normalized = matchText.normalize('NFC');
-    
-    // Check for exact pattern match first - this is the key fix
     for (const category of Object.values(SACRED_WORD_CATEGORIES)) {
       if (category.patterns.includes(normalized)) {
         return category.displayText;
       }
     }
-    
-    // Fallback to original match if no category found
     return matchText;
   }, []);
 
-  // Function to show overlay with auto-dismiss
   const showOverlay = useCallback((sacredWord: string) => {
-    // Clear any existing timeout
-    if (overlayTimeoutRef.current) {
-      clearTimeout(overlayTimeoutRef.current);
+    const now = Date.now();
+    const isSameWord = lastTriggeredWordRef.current === sacredWord;
+    const timeSinceLastTrigger = now - lastTriggerTimeRef.current;
+
+    // Strict debounce: For interim results, prevent rapid-fire identical triggers
+    const isWithinDebounce = timeSinceLastTrigger < 3000;
+
+    // If it's a distinct word but triggered rapidly during the identical stream context, treat it as an upgrade.
+    const isUpgrade = !isSameWord && timeSinceLastTrigger < 1500;
+
+    if (isSameWord && isWithinDebounce) {
+      // Skip redundant overlay updates entirely
+      return;
     }
 
-    // Update overlay state
-    setOverlayState({
-      isVisible: true,
-      sacredWord
-    });
+    lastTriggerTimeRef.current = now;
+    lastTriggeredWordRef.current = sacredWord;
 
-    // Auto-dismiss after 3 seconds
-    overlayTimeoutRef.current = setTimeout(() => {
-      setOverlayState(prev => ({
-        ...prev,
-        isVisible: false
-      }));
-      
-      // Clear the word after fade out animation
-      setTimeout(() => {
-        setOverlayState({
-          isVisible: false,
-          sacredWord: ''
-        });
-      }, 300); // Match CSS transition duration
-    }, 3000);
-  }, []);
+    if (overlayTimeoutRef.current) clearTimeout(overlayTimeoutRef.current);
+    if (fadeOutTimeoutRef.current) clearTimeout(fadeOutTimeoutRef.current);
 
-  // Function to reset timer for duplicate matches (limited to 3 resets max)
-  const resetOverlayTimer = useCallback((sacredWord: string) => {
-    const currentResetCount = timerResetCountRef.current.get(sacredWord) || 0;
-    
-    // Only allow timer reset if we haven't exceeded the limit of 3 resets
-    if (currentResetCount < 3) {
-      // Clear existing timeout
-      if (overlayTimeoutRef.current) {
-        clearTimeout(overlayTimeoutRef.current);
-      }
-
-      // Increment reset count
-      timerResetCountRef.current.set(sacredWord, currentResetCount + 1);
-
-      // Keep the overlay visible and reset the 3-second timer
-      overlayTimeoutRef.current = setTimeout(() => {
+    if (isUpgrade) {
+      // Smooth upgrade: update text but keep the same ID to prevent React remount flash
+      flushSync(() => {
         setOverlayState(prev => ({
           ...prev,
-          isVisible: false
+          isVisible: true,
+          sacredWord
         }));
-        
-        // Clear the word after fade out animation
-        setTimeout(() => {
-          setOverlayState({
-            isVisible: false,
-            sacredWord: ''
-          });
-        }, 300); // Match CSS transition duration
-      }, 3000);
-      
-      console.log(`[SacredWordDetection] Timer reset for "${sacredWord}" (${currentResetCount + 1}/3)`);
+      });
     } else {
-      console.log(`[SacredWordDetection] Timer reset limit reached for "${sacredWord}"`);
+      // New distinct overlay trigger
+      flushSync(() => {
+        setOverlayState({
+          isVisible: true,
+          sacredWord,
+          id: overlayCounterRef.current++
+        });
+      });
     }
+
+    overlayTimeoutRef.current = setTimeout(() => {
+      setOverlayState(prev => ({ ...prev, isVisible: false }));
+      fadeOutTimeoutRef.current = setTimeout(() => {
+        setOverlayState(prev => ({ ...prev, sacredWord: '' }));
+      }, 300);
+    }, 4000);
   }, []);
 
-  const detectInTranscript = useCallback((
-    combinedText: string, 
-    context: 'general' | 'shabad' = 'general',
+  /**
+   * Finalized architecture: Process only the new segment.
+   * Manage transcript state internally to avoid full rescans.
+   */
+  const detectNewSegment = useCallback((
+    segment: string,
+    isFinal: boolean,
     isDisplayingResults: boolean = false
   ): DetectionResult => {
-    const trimmedText = combinedText.trim();
-    
-    if (!trimmedText) {
+    if (!segment.trim()) {
       return {
-        match: null,
-        filteredTranscript: ''
+        filteredFinalTranscript: filteredWordsRef.current.join(' '),
+        filteredInterimTranscript: ''
       };
     }
 
-    // Single pass detection and removal
-    const { matches, filteredText } = detectAndRemoveSacredWords(trimmedText, context);
-    
-    if (matches.length === 0) {
-      return {
-        match: null,
-        filteredTranscript: trimmedText
-      };
-    }
+    // For final results, we permanently advance the detector and update filteredWords
+    if (isFinal) {
+      const words = segment.trim().split(/\s+/);
 
-    // Get the first match (they're already sorted by priority)
-    const bestMatch = matches[0];
+      words.forEach(word => {
+        const normalized = word.normalize('NFC');
+        filteredWordsRef.current.push(normalized);
 
-    console.log('[SacredWordDetection] Sacred word detected:', bestMatch.match);
-
-    // Show overlay logic - only after sacred word has been detected AND removed from filteredText
-    const shouldShowOverlay = !isDisplayingResults || !isMoolMantar(bestMatch.match);
-    
-    if (shouldShowOverlay) {
-      // Get the categorized display text for this match
-      const displayText = getDisplayTextForPattern(bestMatch.match);
-      
-      // Use setTimeout to ensure overlay shows after the text processing is complete
-      setTimeout(() => {
-        // Check if we've already shown overlay for this exact text
-        if (shownTextsRef.current.has(displayText)) {
-          // Text already shown - check if overlay is currently visible for timer reset
-          if (overlayState.isVisible && overlayState.sacredWord === displayText) {
-            resetOverlayTimer(displayText);
+        const result = detectorRef.current.processWord(normalized);
+        if (result.fullMatch) {
+          // STEP 3: Remove the words that made up the match from the filtered list
+          if (result.consumedWordCount > 0) {
+            filteredWordsRef.current.splice(
+              filteredWordsRef.current.length - result.consumedWordCount,
+              result.consumedWordCount
+            );
           }
-          // If overlay not visible, don't show again for same text
-          return;
+
+          console.log("SACRED DETECTED (Streaming):", result.fullMatch);
+
+          // Trigger overlay
+          if (!isDisplayingResults || !isMoolMantar(result.fullMatch)) {
+            showOverlay(getDisplayTextForPattern(result.fullMatch));
+          }
         }
+      });
 
-        // New text - show overlay and mark as shown
-        console.log('[SacredWordDetection] Sacred word overlay shown after removal:', displayText);
-        shownTextsRef.current.add(displayText);
-        timerResetCountRef.current.set(displayText, 0); // Initialize reset count
-        lastMatchRef.current = bestMatch.match;
-        showOverlay(displayText);
-      }, 0); // Use setTimeout with 0 delay to ensure it runs after current execution context
+      return {
+        filteredFinalTranscript: filteredWordsRef.current.join(' '),
+        filteredInterimTranscript: ''
+      };
+    } else {
+      /**
+       * For interim segments, we need a preview of the filtered transcript.
+       * We don't advance the global StreamingDetector because interim speech is unstable.
+       * Instead, we filter the interim segment statelessly using the Trie.
+       */
+      const interimWords = segment.trim().split(/\s+/).map(w => w.normalize('NFC'));
+
+      // Use the Trie to find all matches in the interim segment alone
+      const interimMatches = sacredTrie.findAllMatches(segment);
+
+      // Filter out matched words from a copy of the interim segment
+      let filteredInterim = [...interimWords];
+
+      // Dedup matches to avoid processing identically matched subsets redundantly
+      const processedMatches = new Set<string>();
+
+      // We process matches in reverse order to keep indices valid after splice
+      [...interimMatches].reverse().forEach(match => {
+        const count = match.phrase.split(/\s+/).length;
+        filteredInterim.splice(match.startIndex, count);
+
+        // Trigger overlay for interim match if it's new
+        if (!processedMatches.has(match.phrase)) {
+          processedMatches.add(match.phrase);
+          if (!isDisplayingResults || !isMoolMantar(match.phrase)) {
+            showOverlay(getDisplayTextForPattern(match.phrase));
+          }
+        }
+      });
+
+      const finalTranscript = filteredWordsRef.current.join(' ');
+      const interimPart = filteredInterim.join(' ');
+
+      return {
+        filteredFinalTranscript: finalTranscript,
+        filteredInterimTranscript: interimPart
+      };
     }
+  }, [isMoolMantar, showOverlay, getDisplayTextForPattern]);
 
-    return {
-      match: bestMatch,
-      filteredTranscript: filteredText
-    };
-  }, [isMoolMantar, showOverlay, getDisplayTextForPattern, resetOverlayTimer, overlayState.isVisible, overlayState.sacredWord]);
-
-  // Function to clear tracking data (can be called externally if needed)
   const clearTrackingData = useCallback(() => {
-    shownTextsRef.current.clear();
-    timerResetCountRef.current.clear();
-    lastMatchRef.current = '';
+    filteredWordsRef.current = [];
+    detectorRef.current.reset();
+    setOverlayState({ isVisible: false, sacredWord: '', id: 0 });
+    lastTriggeredWordRef.current = '';
+    lastTriggerTimeRef.current = 0;
     console.log('[SacredWordDetection] Tracking data cleared');
   }, []);
 
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (overlayTimeoutRef.current) {
-        clearTimeout(overlayTimeoutRef.current);
-      }
-    };
-  }, []);
-
   return {
-    detectInTranscript,
+    detectNewSegment,
     overlayState,
     clearTrackingData
   };
-} 
+}

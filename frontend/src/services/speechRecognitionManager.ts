@@ -15,13 +15,15 @@ class SpeechRecognitionManager {
   private autoRestartEnabled = true;
   private restartTimeoutId: NodeJS.Timeout | null = null;
 
+  private isStarting = false;
+
   private config: SpeechRecognitionConfig = {
     language: 'pa-IN',
     continuous: true,
     interimResults: true,
     maxNoSpeechErrors: 3,
     restartDelay: 800,
-    voiceThreshold: 0.15  // Increased from 0.1 to 0.15 for better voice detection
+    voiceThreshold: 0.10  // Lowered from 0.15 to prevent stopping VAD too early
   };
 
   constructor() {
@@ -37,15 +39,21 @@ class SpeechRecognitionManager {
     }
   }
 
-  initialize(): boolean {
+  initialize(forceRefresh = false): boolean {
     if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
       this.emitError('Speech recognition not supported in this browser');
       return false;
     }
 
+    if (!forceRefresh && this.recognition) {
+      return true; // Already initialized
+    }
+
     // Clean up existing recognition
     if (this.recognition) {
       try {
+        this.recognition.onend = null;
+        this.recognition.onerror = null;
         this.recognition.abort();
       } catch (e) {
         // Ignore errors when aborting
@@ -70,6 +78,7 @@ class SpeechRecognitionManager {
 
     this.recognition.onstart = () => {
       console.log('[SpeechManager] Recognition started');
+      this.isStarting = false;
       this.setState(SpeechState.LISTENING);
       this.isManuallyStoppedRef = false;
     };
@@ -115,6 +124,7 @@ class SpeechRecognitionManager {
     };
 
     this.recognition.onend = () => {
+      this.isStarting = false;
       console.log('[SpeechManager] Recognition ended - manually stopped:', this.isManuallyStoppedRef, 'current state:', this.currentState);
 
       if (!this.isManuallyStoppedRef) {
@@ -219,7 +229,7 @@ class SpeechRecognitionManager {
       audioDetectionService.stopDetection();
       this.noSpeechErrorCount = 0; // Reset counter when voice is detected
       this.emitNoSpeechCount(this.noSpeechErrorCount);
-      
+
       // Only restart if auto-restart is still enabled
       if (this.autoRestartEnabled) {
         this.start();
@@ -228,28 +238,41 @@ class SpeechRecognitionManager {
   }
 
   start(): void {
+    if (this.isStarting || this.currentState === SpeechState.LISTENING) {
+      console.log('[SpeechManager] Already starting or listening, ignoring start request');
+      return;
+    }
+
+    this.isStarting = true;
+    this.isManuallyStoppedRef = false;
     // Enable auto-restart when starting
     this.autoRestartEnabled = true;
-    
+
     // Always create a fresh recognition instance to avoid state issues
-    if (!this.initialize()) return;
+    if (!this.initialize(true)) {
+      this.isStarting = false;
+      return;
+    }
 
     try {
       this.recognition!.start();
       console.log('[SpeechManager] Starting recognition');
     } catch (error) {
+      this.isStarting = false;
       console.log('[SpeechManager] Recognition already running or error starting');
       // If start fails, try again after a short delay with a fresh instance
-      if (this.autoRestartEnabled) {
+      if (this.autoRestartEnabled && !this.isManuallyStoppedRef) {
         setTimeout(() => {
           if (!this.isManuallyStoppedRef && this.autoRestartEnabled) {
-            this.initialize();
+            this.initialize(true);
             try {
+              this.isStarting = true;
               this.recognition!.start();
             } catch (retryError) {
+              this.isStarting = false;
               console.log('[SpeechManager] Retry failed, will try again later');
               // Schedule another restart attempt if auto-restart is enabled
-              if (this.autoRestartEnabled) {
+              if (this.autoRestartEnabled && !this.isManuallyStoppedRef) {
                 this.setState(SpeechState.WAITING_FOR_VOICE);
                 this.scheduleRestart();
               }
@@ -263,13 +286,13 @@ class SpeechRecognitionManager {
   stop(): void {
     this.isManuallyStoppedRef = true;
     this.autoRestartEnabled = false; // Disable auto-restart when manually stopped
-    
+
     // Clear any pending restart timeouts
     if (this.restartTimeoutId) {
       clearTimeout(this.restartTimeoutId);
       this.restartTimeoutId = null;
     }
-    
+
     audioDetectionService.stopDetection();
 
     if (this.recognition) {
@@ -285,19 +308,19 @@ class SpeechRecognitionManager {
     // Don't call stop() as it disables auto-restart
     this.isManuallyStoppedRef = false;
     this.autoRestartEnabled = true;
-    
+
     // Clear any pending restart timeouts
     if (this.restartTimeoutId) {
       clearTimeout(this.restartTimeoutId);
       this.restartTimeoutId = null;
     }
-    
+
     audioDetectionService.stopDetection();
 
     if (this.recognition) {
       this.recognition.abort();
     }
-    
+
     this.startWaitingForVoice();
   }
 
@@ -321,7 +344,7 @@ class SpeechRecognitionManager {
   setAutoRestart(enabled: boolean): void {
     this.autoRestartEnabled = enabled;
     console.log('[SpeechManager] Auto-restart', enabled ? 'enabled' : 'disabled');
-    
+
     if (!enabled) {
       // Clear any pending restart timeouts
       if (this.restartTimeoutId) {
@@ -374,15 +397,26 @@ class SpeechRecognitionManager {
   }
 
   cleanup(): void {
+    this.isManuallyStoppedRef = true;
     this.autoRestartEnabled = false;
-    
+    this.isStarting = false;
+
     // Clear any pending restart timeouts
     if (this.restartTimeoutId) {
       clearTimeout(this.restartTimeoutId);
       this.restartTimeoutId = null;
     }
-    
-    this.stop();
+
+    if (this.recognition) {
+      this.recognition.onend = null;
+      this.recognition.onerror = null;
+      try {
+        this.recognition.abort();
+      } catch (e) { }
+      this.recognition = null;
+    }
+
+    this.setState(SpeechState.STOPPED);
     audioDetectionService.cleanup();
     this.eventListeners = {};
     console.log('[SpeechManager] Cleaned up');
