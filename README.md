@@ -22,7 +22,7 @@ A real-time Punjabi audio transcription system that transcribes audio in Gurmukh
 ## Prerequisites
 
 - Python 3.8+
-- Node.js 16+
+- Node.js 18+ (LTS recommended)
 - npm or yarn
 
 ## Installation

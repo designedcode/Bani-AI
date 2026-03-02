@@ -5,7 +5,7 @@ class AudioDetectionService {
   private source: MediaStreamAudioSourceNode | null = null;
   private rafId: number | null = null;
   private stream: MediaStream | null = null;
-  
+
   private isActive = false;
   private threshold = 0.1;
   private debounceTime = 300; // ms
@@ -13,16 +13,31 @@ class AudioDetectionService {
   private voiceDetectedCallback: (() => void) | null = null;
 
   async initialize(): Promise<void> {
+    if (this.audioContext && this.analyser && this.stream) {
+      console.log('[AudioDetection] Already initialized');
+      return;
+    }
+
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      this.analyser = this.audioContext.createAnalyser();
-      this.analyser.fftSize = 256;
-      
-      this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
-      this.source = this.audioContext.createMediaStreamSource(this.stream);
-      this.source.connect(this.analyser);
-      
+      if (!this.stream) {
+        this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+
+      if (!this.audioContext) {
+        this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+
+      if (!this.analyser) {
+        this.analyser = this.audioContext.createAnalyser();
+        this.analyser.fftSize = 1024;
+        this.dataArray = new Uint8Array(this.analyser.fftSize);
+      }
+
+      if (!this.source && this.stream && this.analyser) {
+        this.source = this.audioContext.createMediaStreamSource(this.stream);
+        this.source.connect(this.analyser);
+      }
+
       console.log('[AudioDetection] Initialized successfully');
     } catch (error) {
       console.error('[AudioDetection] Failed to initialize:', error);
@@ -45,20 +60,20 @@ class AudioDetectionService {
   stopDetection(): void {
     this.isActive = false;
     this.voiceDetectedCallback = null;
-    
+
     if (this.rafId) {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
     }
-    
+
     console.log('[AudioDetection] Stopped voice activity detection');
   }
 
   private detectVoiceActivity = (): void => {
     if (!this.isActive || !this.analyser || !this.dataArray) return;
 
-    this.analyser.getByteTimeDomainData(this.dataArray);
-    
+    (this.analyser as any).getByteTimeDomainData(this.dataArray);
+
     // Calculate RMS volume
     let sum = 0;
     for (let i = 0; i < this.dataArray.length; i++) {
@@ -70,7 +85,7 @@ class AudioDetectionService {
     // Check if voice activity detected above threshold
     if (rms > this.threshold) {
       const now = Date.now();
-      
+
       // Only trigger if enough time has passed since last detection
       if (now - this.lastVoiceTime > this.debounceTime) {
         this.lastVoiceTime = now;
@@ -84,10 +99,17 @@ class AudioDetectionService {
     this.rafId = requestAnimationFrame(this.detectVoiceActivity);
   };
 
+  async resume(): Promise<void> {
+    if (this.audioContext && this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+      console.log('[AudioDetection] AudioContext resumed');
+    }
+  }
+
   getCurrentVolume(): number {
     if (!this.analyser || !this.dataArray) return 0;
-    
-    this.analyser.getByteTimeDomainData(this.dataArray);
+
+    (this.analyser as any).getByteTimeDomainData(this.dataArray);
     let sum = 0;
     for (let i = 0; i < this.dataArray.length; i++) {
       const val = (this.dataArray[i] - 128) / 128;
@@ -103,21 +125,21 @@ class AudioDetectionService {
 
   cleanup(): void {
     this.stopDetection();
-    
+
     if (this.audioContext) {
       this.audioContext.close();
       this.audioContext = null;
     }
-    
+
     if (this.stream) {
       this.stream.getTracks().forEach(track => track.stop());
       this.stream = null;
     }
-    
+
     this.analyser = null;
     this.dataArray = null;
     this.source = null;
-    
+
     console.log('[AudioDetection] Cleaned up');
   }
 }

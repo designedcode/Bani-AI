@@ -30,13 +30,18 @@ class SpeechRecognitionManager {
     this.initializeAudioDetection();
   }
 
-  private async initializeAudioDetection(): Promise<void> {
+  private async ensureAudioDetectionInitialized(): Promise<void> {
     try {
       await audioDetectionService.initialize();
       audioDetectionService.setThreshold(this.config.voiceThreshold);
+      await audioDetectionService.resume();
     } catch (error) {
-      console.error('[SpeechManager] Failed to initialize audio detection:', error);
+      console.error('[SpeechManager] Failed to ensure audio detection:', error);
     }
+  }
+
+  private async initializeAudioDetection(): Promise<void> {
+    await this.ensureAudioDetectionInitialized();
   }
 
   initialize(forceRefresh = false): boolean {
@@ -255,6 +260,7 @@ class SpeechRecognitionManager {
     }
 
     try {
+      this.ensureAudioDetectionInitialized(); // Fire and forget re-initialization
       this.recognition!.start();
       console.log('[SpeechManager] Starting recognition');
     } catch (error) {
@@ -321,6 +327,7 @@ class SpeechRecognitionManager {
       this.recognition.abort();
     }
 
+    this.ensureAudioDetectionInitialized();
     this.startWaitingForVoice();
   }
 
