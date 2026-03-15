@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RapidFuzz method comparison</title>
+  <style>
+    :root {
+      --bg: #0f0f12;
+      --panel: #18181c;
+      --border: #2a2a30;
+      --text: #e4e4e7;
+      --muted: #71717a;
+      --accent: #a78bfa;
+      --accent-hover: #c4b5fd;
+      --success: #34d399;
+      --font: "IBM Plex Sans", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 0.75rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      font-weight: 600;
+      font-size: 1rem;
+    }
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 0;
+      min-height: 0;
+    }
+    .panel-left {
+      padding: 1.5rem;
+      border-right: 1px solid var(--border);
+      background: var(--panel);
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .panel-left label {
+      display: block;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 0.25rem;
+    }
+    textarea {
+      width: 100%;
+      min-height: 100px;
+      padding: 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.95rem;
+      resize: vertical;
+    }
+    textarea::placeholder { color: var(--muted); }
+    select {
+      width: 100%;
+      padding: 0.6rem 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    button {
+      padding: 0.65rem 1.25rem;
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      border-radius: 8px;
+      font-family: inherit;
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    button:hover { background: var(--accent-hover); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .panel-right {
+      padding: 1.5rem;
+      overflow: auto;
+    }
+    .results-title {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+    .results-title strong { color: var(--text); }
+    .result-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .result-item {
+      padding: 1rem;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: start;
+      gap: 1rem;
+    }
+    .result-rank {
+      width: 1.75rem;
+      height: 1.75rem;
+      border-radius: 6px;
+      background: var(--border);
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .result-body { min-width: 0; }
+    .result-text {
+      font-size: 0.95rem;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+    .result-shabad {
+      font-size: 0.8rem;
+      color: var(--accent);
+      margin-top: 0.35rem;
+    }
+    .result-score {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--success);
+      flex-shrink: 0;
+    }
+    .empty-state {
+      color: var(--muted);
+      font-size: 0.95rem;
+      text-align: center;
+      padding: 2rem;
+    }
+    .error-state { color: #f87171; }
+    .loading { opacity: 0.7; pointer-events: none; }
+    .panel-hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 0.5rem 0;
+    }
+    .custom-result-card {
+      padding: 1rem;
+      margin-bottom: 1rem;
+      background: rgba(167, 139, 250, 0.12);
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+    }
+    .custom-result-card .custom-label {
+      font-size: 0.75rem;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.5rem;
+    }
+    .custom-result-card .custom-text { font-size: 0.95rem; line-height: 1.5; word-break: break-word; }
+    .custom-result-card .custom-meta { font-size: 0.8rem; color: var(--muted); margin-top: 0.35rem; }
+    .custom-result-card .custom-score { font-size: 1rem; font-weight: 700; color: var(--success); margin-top: 0.5rem; }
+    .voice-section { margin-bottom: 0.25rem; }
+    .voice-buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .voice-buttons button { flex: 1; min-width: 120px; }
+    #stopListening { background: #dc2626; color: #fff; }
+    #stopListening:hover:not(:disabled) { background: #ef4444; }
+    .listen-status {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 0.35rem;
+      min-height: 1.2em;
+    }
+    .listen-status.listening { color: var(--success); }
+    .listen-status.error { color: #f87171; }
+  </style>
+</head>
+<body>
+  <header>RapidFuzz method comparison</header>
+  <main>
+    <div class="panel-left">
+      <div class="voice-section">
+        <label>Voice search (Punjabi)</label>
+        <div class="voice-buttons">
+          <button id="startListening" type="button">Start listening</button>
+          <button id="stopListening" type="button" disabled>Stop listening</button>
+        </div>
+        <div id="listenStatus" class="listen-status" aria-live="polite"></div>
+      </div>
+      <div>
+        <label for="query">Search text</label>
+        <textarea id="query" placeholder="Speak or enter Gurmukhi text to search…"></textarea>
+      </div>
+      <div>
+        <label for="method">Scoring method</label>
+        <select id="method"></select>
+      </div>
+      <button id="search" type="button">Search (top 10)</button>
+      <hr class="panel-hr" />
+      <div>
+        <label for="customText">Custom result text (score vs search text)</label>
+        <textarea id="customText" placeholder="Paste or type text to see its match score…" rows="3"></textarea>
+      </div>
+      <button id="addCustom" type="button">Add & show score</button>
+    </div>
+    <div class="panel-right">
+      <div id="customResult" class="custom-result-card" style="display: none;"></div>
+      <div class="results-title"><strong>Results</strong> — enter text and click Search</div>
+      <ul id="results" class="result-list"></ul>
+    </div>
+  </main>
+  <script>
+    const API_BASE = 'http://localhost:8001';
+    const queryEl = document.getElementById('query');
+    const methodEl = document.getElementById('method');
+    const searchBtn = document.getElementById('search');
+    const startListeningBtn = document.getElementById('startListening');
+    const stopListeningBtn = document.getElementById('stopListening');
+    const listenStatusEl = document.getElementById('listenStatus');
+    const customTextEl = document.getElementById('customText');
+    const addCustomBtn = document.getElementById('addCustom');
+    const customResultEl = document.getElementById('customResult');
+    const resultsEl = document.getElementById('results');
+    const resultsTitle = document.querySelector('.results-title');
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = SpeechRecognition ? new SpeechRecognition() : null;
+    if (recognition) {
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = 'pa-IN';
+      recognition.onresult = function(e) {
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const result = e.results[i];
+          if (result.isFinal && result[0].transcript) {
+            const transcript = result[0].transcript.trim();
+            if (transcript) {
+              queryEl.value = transcript;
+              runSearch();
+            }
+          }
+        }
+      };
+      recognition.onend = function() {
+        setListeningState(false);
+      };
+      recognition.onerror = function(e) {
+        setListeningState(false);
+        if (e.error !== 'aborted' && e.error !== 'no-speech') {
+          listenStatusEl.textContent = 'Error: ' + (e.error || 'Unknown');
+          listenStatusEl.classList.add('error');
+        }
+      };
+      recognition.onstart = function() {
+        listenStatusEl.textContent = 'Listening (pa-IN)…';
+        listenStatusEl.classList.add('listening');
+        listenStatusEl.classList.remove('error');
+      };
+    } else {
+      startListeningBtn.disabled = true;
+      stopListeningBtn.disabled = true;
+      listenStatusEl.textContent = 'Speech recognition not supported in this browser.';
+      listenStatusEl.classList.add('error');
+    }
+
+    function setListeningState(listening) {
+      startListeningBtn.disabled = listening;
+      stopListeningBtn.disabled = !listening;
+      if (!listening) {
+        listenStatusEl.textContent = '';
+        listenStatusEl.classList.remove('listening', 'error');
+      }
+    }
+
+    function startListening() {
+      if (!recognition) return;
+      try {
+        recognition.start();
+        setListeningState(true);
+      } catch (err) {
+        listenStatusEl.textContent = 'Error: ' + (err.message || 'Could not start');
+        listenStatusEl.classList.add('error');
+      }
+    }
+
+    function stopListening() {
+      if (!recognition) return;
+      recognition.stop();
+    }
+
+    if (recognition) {
+      startListeningBtn.addEventListener('click', startListening);
+      stopListeningBtn.addEventListener('click', stopListening);
+    }
+
+    async function loadMethods() {
+      try {
+        const r = await fetch(API_BASE + '/api/methods');
+        const data = await r.json();
+        methodEl.innerHTML = data.methods.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
+      } catch (e) {
+        console.warn('Could not load methods', e);
+        methodEl.innerHTML = '<option value="weighted">weighted</option><option value="ratio">ratio</option><option value="partial_ratio">partial_ratio</option><option value="token_set_ratio">token_set_ratio</option>';
+      }
+    }
+
+    function setLoading(loading) {
+      searchBtn.disabled = loading;
+      searchBtn.textContent = loading ? 'Searching…' : 'Search (top 10)';
+      document.body.classList.toggle('loading', loading);
+    }
+
+    function renderResults(response) {
+      if (!response) {
+        resultsTitle.innerHTML = '<strong>Results</strong> — enter text and click Search';
+        resultsEl.innerHTML = '';
+        return;
+      }
+      const { method_label, query, results, total_verses } = response;
+      resultsTitle.innerHTML = `<strong>Results</strong> — method: ${method_label} · ${results.length} of ${total_verses} verses`;
+      if (results.length === 0) {
+        resultsEl.innerHTML = '<li class="empty-state">No matches. Try a different query or method.</li>';
+        return;
+      }
+      resultsEl.innerHTML = results.map(r => `
+        <li class="result-item">
+          <span class="result-rank">${r.rank}</span>
+          <div class="result-body">
+            <div class="result-text">${escapeHtml(r.text)}</div>
+            <div class="result-shabad">ShabadID: ${r.shabadID}</div>
+          </div>
+          <span class="result-score">${r.score}</span>
+        </li>
+      `).join('');
+    }
+
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    async function runSearch() {
+      const query = queryEl.value.trim();
+      if (!query) {
+        resultsTitle.innerHTML = '<strong>Results</strong> — enter some text first';
+        resultsEl.innerHTML = '<li class="empty-state">Enter search text in the left panel.</li>';
+        return;
+      }
+      setLoading(true);
+      try {
+        const r = await fetch(API_BASE + '/api/fuzzy-search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, method: methodEl.value, limit: 10 })
+        });
+        if (!r.ok) throw new Error(r.statusText);
+        const data = await r.json();
+        renderResults(data);
+      } catch (e) {
+        resultsTitle.innerHTML = '<strong>Results</strong>';
+        resultsEl.innerHTML = `<li class="empty-state error-state">Request failed. Is the backend running on port 8001? ${e.message}</li>`;
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function showCustomResult(data) {
+      if (!data) {
+        customResultEl.style.display = 'none';
+        return;
+      }
+      customResultEl.style.display = 'block';
+      customResultEl.innerHTML = `
+        <div class="custom-label">Custom result · ${escapeHtml(data.method_label)}</div>
+        <div class="custom-text">${escapeHtml(data.custom_text)}</div>
+        <div class="custom-meta">Score vs search text</div>
+        <div class="custom-score">Match score: ${data.score}</div>
+      `;
+    }
+
+    async function runAddCustom() {
+      const query = queryEl.value.trim();
+      const customText = customTextEl.value.trim();
+      if (!query) {
+        showCustomResult(null);
+        customResultEl.style.display = 'block';
+        customResultEl.innerHTML = '<div class="empty-state">Enter search text above first.</div>';
+        return;
+      }
+      if (!customText) {
+        showCustomResult(null);
+        customResultEl.style.display = 'block';
+        customResultEl.innerHTML = '<div class="empty-state">Enter custom result text.</div>';
+        return;
+      }
+      addCustomBtn.disabled = true;
+      addCustomBtn.textContent = 'Scoring…';
+      try {
+        const r = await fetch(API_BASE + '/api/score-custom', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, custom_text: customText, method: methodEl.value })
+        });
+        if (!r.ok) throw new Error(r.statusText);
+        const data = await r.json();
+        showCustomResult(data);
+      } catch (e) {
+        customResultEl.style.display = 'block';
+        customResultEl.innerHTML = `<div class="empty-state error-state">Request failed. ${e.message}</div>`;
+      } finally {
+        addCustomBtn.disabled = false;
+        addCustomBtn.textContent = 'Add & show score';
+      }
+    }
+
+    searchBtn.addEventListener('click', runSearch);
+    queryEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runSearch(); } });
+    addCustomBtn.addEventListener('click', runAddCustom);
+    loadMethods();
+  </script>
+</body>
+</html>
