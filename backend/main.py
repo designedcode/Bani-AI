@@ -44,7 +44,7 @@ app.add_middleware(
 # --- Database Fuzzy Search Setup ---
 from pathlib import Path
 
-DATABASE_PATH = Path(__file__).parent / "uploads" / "shabads_verses_SGGS.db"
+DATABASE_PATH = Path(__file__).parent / "uploads" / "shabads_verses_Optimised_SGGS_window8words_step2_byShabad.db"
 VERSES_DATA = []  # List of (ShabadID, GurmukhiUni) tuples
 DATABASE_LOADED = False
 FUZZY_THRESHOLD = float(os.getenv("FUZZY_MATCH_THRESHOLD", "60"))
