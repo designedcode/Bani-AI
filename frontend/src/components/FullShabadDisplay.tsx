@@ -240,6 +240,10 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
   useEffect(() => {
     candidatePersistenceRef.current = { candidate: null, count: 0 };
     nextShabadRequestedRef.current = null;
+
+        // Reset highlight so search starts in the new shabad
+  setHighlightedLineIndex(null);
+    
   }, [shabads]);
 
   // Flatten all lines from all shabads
