@@ -1,0 +1,50 @@
+---
+description: Bani AI backend search architecture, databases, and recent evolution
+globs: backend/**/*
+alwaysApply: false
+---
+
+# Bani AI – Backend search & databases
+
+## Databases (SQLite)
+
+- **Main search DB**  
+  `backend/uploads/shabads_verses_Optimised_SGGS_window8words_step2_byShabad.db`  
+  - Verse table: `ShabadID`, `GurmukhiUni`.  
+  - Optimised: SGGS content as **8-word windows with step 2**, within a single ShabadID (word-separated, not line-separated) for better cross-border matches.  
+  - Used for normal fuzzy search (batch `fuzz.ratio`).
+
+- **4-word DB (repetitive handling)**  
+  `backend/uploads/shabads_verses_cleaned_atLeast_FOUR_words.db`  
+  - Same schema: `Verse(ShabadID, GurmukhiUni)`.  
+  - Verses are at least 4 words (cleaned).  
+  - Used only when **repetitive transcription** is detected: first half of 8-word query is searched with `fuzz.partial_ratio`.
+
+## Search flow (`backend/main.py`)
+
+1. **Startup**  
+   Load both DBs into memory (`VERSES_DATA`, `VERSES_DATA_4WORDS`). NFC-normalise Gurmukhi.
+
+2. **Repetitive handling (8-word queries)**  
+   - Split query into words; if **≥ 8 words**: first half = words 0–4, second half = words 4–8.  
+   - If `fuzz.ratio(first_half, second_half) > 85` and 4-word DB is loaded:  
+     - Search **first half only** with **`fuzz.partial_ratio`** over the 4-word DB.  
+     - Return best match if score ≥ `FUZZY_THRESHOLD`; else return no match.  
+   - Otherwise continue to normal path.
+
+3. **Normal path**  
+   - Batch score all main-DB verses with **`fuzz.ratio`** (no sliding windows).  
+   - Best candidate = single highest-ratio verse.  
+   - Return it if score ≥ `FUZZY_THRESHOLD`.
+
+## Config
+
+- `FUZZY_THRESHOLD`: env `FUZZY_MATCH_THRESHOLD`, default 60.  
+- `REPETITION_RATIO_THRESHOLD`: 85 (first vs second half similarity above this ⇒ repetitive).  
+- BaniDB Optimiser script: `backend/uploads/BaniDB_optimiser.py` – normalises Mahala/Ghar, builds sliding windows, writes new SQLite DB for future DB updates.
+
+## Evolution (recent)
+
+- **Sliding windows removed** in code: main DB is already windowed (8 words, step 2), so runtime sliding windows were dropped; best match is the top `fuzz.ratio` result from batch.  
+- **Repetitive transcriptions**: 8-word queries whose two 4-word halves are very similar (>85 ratio) are detected and handled by searching the first half on the 4-word DB with `partial_ratio`.  
+- **DB path change**: Replaced previous SQLite file with optimised version; paths updated in app and docs; old DB removed.
