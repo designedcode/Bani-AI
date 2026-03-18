@@ -45,22 +45,25 @@ app.add_middleware(
 from pathlib import Path
 
 DATABASE_PATH = Path(__file__).parent / "uploads" / "shabads_verses_Optimised_SGGS_window8words_step2_byShabad.db"
+FOUR_WORD_DATABASE_PATH = Path(__file__).parent / "uploads" / "shabads_verses_cleaned_atLeast_FOUR_words.db"
 VERSES_DATA = []  # List of (ShabadID, GurmukhiUni) tuples
+VERSES_DATA_4WORDS = []  # List of (ShabadID, GurmukhiUni) for repetitive-query search
 DATABASE_LOADED = False
+DATABASE_4WORDS_LOADED = False
 FUZZY_THRESHOLD = float(os.getenv("FUZZY_MATCH_THRESHOLD", "60"))
+REPETITION_RATIO_THRESHOLD = 80  # first_half vs second_half ratio above this => treat as repetitive
 
 # Async loading of database verses
 async def load_database_verses():
-    """Asynchronously load all verses from SQLite database"""
-    global VERSES_DATA, DATABASE_LOADED
-    
+    """Asynchronously load all verses from SQLite databases (main + 4-word for repetitive handling)"""
+    global VERSES_DATA, VERSES_DATA_4WORDS, DATABASE_LOADED, DATABASE_4WORDS_LOADED
+
     if DATABASE_PATH.exists():
         try:
             async with aiosqlite.connect(DATABASE_PATH) as db:
                 async with db.execute("SELECT ShabadID, GurmukhiUni FROM Verse") as cursor:
                     rows = await cursor.fetchall()
                     VERSES_DATA = [(row[0], unicodedata.normalize('NFC', row[1])) for row in rows]
-            
             DATABASE_LOADED = True
             logger.info(f"Loaded {len(VERSES_DATA)} verses from database for fuzzy search.")
         except Exception as e:
@@ -68,6 +71,20 @@ async def load_database_verses():
             DATABASE_LOADED = False
     else:
         logger.warning(f"Database not found at {DATABASE_PATH}. Fuzzy search will be disabled.")
+
+    if FOUR_WORD_DATABASE_PATH.exists():
+        try:
+            async with aiosqlite.connect(FOUR_WORD_DATABASE_PATH) as db:
+                async with db.execute("SELECT ShabadID, GurmukhiUni FROM Verse") as cursor:
+                    rows = await cursor.fetchall()
+                    VERSES_DATA_4WORDS = [(row[0], unicodedata.normalize('NFC', row[1])) for row in rows]
+            DATABASE_4WORDS_LOADED = True
+            logger.info(f"Loaded {len(VERSES_DATA_4WORDS)} verses from 4-word database for repetitive-query search.")
+        except Exception as e:
+            logger.error(f"Error loading 4-word database: {e}")
+            DATABASE_4WORDS_LOADED = False
+    else:
+        logger.warning(f"4-word database not found at {FOUR_WORD_DATABASE_PATH}. Repetitive-query path disabled.")
 
 
 
@@ -81,7 +98,31 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
         return None, None, None
     
     normalized_query = unicodedata.normalize('NFC', query.strip())
-    
+    words = normalized_query.split()
+
+    # Repetitive transcription: split 8-word query into two halves of 4; if halves are very similar, search first half only with partial_ratio on 4-word DB
+    if len(words) >= 8:
+        first_half = " ".join(words[0:4])
+        second_half = " ".join(words[4:8])
+        half_ratio = fuzz.ratio(first_half, second_half)
+        if half_ratio > REPETITION_RATIO_THRESHOLD and DATABASE_4WORDS_LOADED:
+            logger.info(f"DEBUG SEARCH: Repetitive query detected (halves ratio={half_ratio:.1f} > {REPETITION_RATIO_THRESHOLD}). Searching first half with partial_ratio on 4-word DB.")
+            verse_texts_4 = [v[1] for v in VERSES_DATA_4WORDS]
+            batch_results = process.extract(
+                first_half,
+                verse_texts_4,
+                scorer=fuzz.partial_ratio,
+                limit=len(verse_texts_4),
+                score_cutoff=0,
+            )
+            if batch_results:
+                verse_text, score, original_index = batch_results[0]
+                best_shabad_id = VERSES_DATA_4WORDS[original_index][0]
+                logger.info(f"DEBUG SEARCH: Best partial_ratio match - ShabadID: {best_shabad_id}, score: {score:.2f} | '{verse_text}'")
+                if score >= threshold:
+                    return verse_text, best_shabad_id, score
+                return None, None, None
+
     # Step 1: Batch process all verses using rapidfuzz.process for optimal performance
     logger.info(f"DEBUG SEARCH: Step 1 - Batch scoring all {len(VERSES_DATA)} verses with rapidfuzz.process")
     
