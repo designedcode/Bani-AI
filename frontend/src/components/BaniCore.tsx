@@ -25,15 +25,14 @@ function BaniCore({ mode }: BaniCoreProps) {
     const [isProcessing, setIsProcessing] = useState(false);
 
     const shabadsBeingFetched = useRef<Set<number>>(new Set());
-    const shabadsLoadedRef = useRef(false); // Track if shabads are loaded
-    const transcriptionSentRef = useRef(false); // Track if we've already sent a transcription
-    const wordCountTriggeredRef = useRef(false); // Track if 8+ words have been reached
+    const shabadsLoadedRef = useRef(false);
+    const transcriptionSentRef = useRef(false);
+    const wordCountTriggeredRef = useRef(false);
     const [subtitleText, setSubtitleText] = useState('');
     const [showMatchedSubtitle, setShowMatchedSubtitle] = useState(false);
     const [isFiltering, setIsFiltering] = useState(false);
-    const MATCH_DISPLAY_DELAY = 1800; // ms
+    const MATCH_DISPLAY_DELAY = 1800;
 
-    // Use the new speech recognition hook - keep running even when shabads are loaded
     const {
         isListening,
         transcribedText,
@@ -47,42 +46,22 @@ function BaniCore({ mode }: BaniCoreProps) {
         sacredWordOverlay
     } = useSpeechRecognition(shabads.length > 0);
 
-    // Simple function to send transcription data via HTTP (no debouncing)
     const sendTranscription = useCallback(async (text: string, confidence: number) => {
-        // Don't send if max no-speech errors reached
-        if (noSpeechCount >= 3) {
-            return;
-        }
-
-        // Don't send if we've already sent a transcription successfully
-        if (transcriptionSentRef.current) {
-            return;
-        }
-
-        // Don't send if already processing
-        if (isProcessing) {
-            return;
-        }
-
-        // IMPORTANT: Don't process transcription if we already have shabads loaded
-        if (shabadsLoadedRef.current || searchTriggered) {
-            return;
-        }
+        if (noSpeechCount >= 3) return;
+        if (transcriptionSentRef.current) return;
+        if (isProcessing) return;
+        if (shabadsLoadedRef.current || searchTriggered) return;
 
         try {
             setIsProcessing(true);
-
-            // Mark that we're sending a transcription to prevent duplicates
             transcriptionSentRef.current = true;
 
             const response = await transcriptionService.transcribeAndSearch(text, confidence);
 
-            // Update state with response - only keep what we actually use
             if (response.results && response.results.length > 0) {
                 setLastSggsMatchFound(response.sggs_match_found);
                 setLastBestSggsMatch(response.best_sggs_match);
 
-                // Fetch full shabad if not already loaded
                 const newShabadId = response.results[0].shabad_id;
                 if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
                     shabadsBeingFetched.current.add(newShabadId);
@@ -98,14 +77,10 @@ function BaniCore({ mode }: BaniCoreProps) {
             }
         } catch (err) {
             console.error('Transcription error:', err);
-
-            // Check if this is a "no results" error that will trigger page refresh
             if (err instanceof Error && err.message.includes('No results found - page will refresh')) {
-                // Don't show error message, just let the page refresh happen
                 setUserMessage('No results found. Refreshing...');
             } else {
                 setUserMessage('Failed to process transcription');
-                // Reset the flag on error so user can try again
                 transcriptionSentRef.current = false;
                 wordCountTriggeredRef.current = false;
             }
@@ -114,77 +89,51 @@ function BaniCore({ mode }: BaniCoreProps) {
         }
     }, [shabads, searchTriggered, isProcessing, noSpeechCount]);
 
-    // Handle speech recognition results and trigger transcription
     useEffect(() => {
-        // Don't process transcription if max no-speech errors reached
-        if (noSpeechCount >= 3) {
-            return;
-        }
+        if (noSpeechCount >= 3) return;
+        if (isFiltering) return;
 
-        // Don't process if currently filtering
-        if (isFiltering) {
-            return;
-        }
-
-        // Use pre-filtered text from speech recognition hook
         const combinedText = (transcribedText + ' ' + interimTranscript).trim();
-
-        if (!combinedText) {
-            return;
-        }
+        if (!combinedText) return;
 
         setIsFiltering(true);
 
         try {
-            // Count words on the already-filtered text from speech recognition
             const wordCount = combinedText.split(/\s+/).filter(word => word.length > 0).length;
 
             console.log('[BaniCore] Pre-filtered combined text:', combinedText);
             console.log('[BaniCore] Word count:', wordCount);
 
-            // Send transcription only if text has 8+ words (and other conditions met)
             if (wordCount >= 8 && !wordCountTriggeredRef.current && !shabadsLoadedRef.current && !transcriptionSentRef.current) {
-                wordCountTriggeredRef.current = true; // Mark that we've triggered the 8+ word condition
-
+                wordCountTriggeredRef.current = true;
                 console.log('[BaniCore] Triggering API call with pre-filtered text');
-                sendTranscription(combinedText, 0.8); // Send pre-filtered text to API
+                sendTranscription(combinedText, 0.8);
             }
         } finally {
             setIsFiltering(false);
         }
     }, [transcribedText, interimTranscript, sendTranscription, noSpeechCount, isFiltering]);
 
-    // Handle speech recognition errors
     useEffect(() => {
         if (error) {
             setUserMessage(`Speech error: ${error}`);
         } else if (!isProcessing) {
-            // Only clear message if not processing to avoid clearing processing messages
             setUserMessage('');
         }
     }, [error, isProcessing]);
 
-    // Handle returning to loading overlay when max no-speech errors reached
     useEffect(() => {
         if (noSpeechCount >= 3 && shabads.length > 0) {
             setShowLoader(true);
-
-            // Clear shabads to force fresh search
             setShabads([]);
-
-            // Aggressively reset ALL transcription-related state
-            resetTranscription(); // Clear all transcribed text
+            resetTranscription();
             transcriptionSentRef.current = false;
             wordCountTriggeredRef.current = false;
             shabadsLoadedRef.current = false;
-
-            // Clear all subtitle and match state immediately
             setSubtitleText('');
             setShowMatchedSubtitle(false);
             setLastSggsMatchFound(null);
             setLastBestSggsMatch(null);
-
-            // Force another clear after a brief delay to ensure state updates
             setTimeout(() => {
                 setSubtitleText('');
                 resetTranscription();
@@ -192,30 +141,24 @@ function BaniCore({ mode }: BaniCoreProps) {
         }
     }, [noSpeechCount, shabads.length, resetTranscription]);
 
-    // Hide loader as soon as a shabad is found
     useEffect(() => {
         if (shabads.length > 0) {
             setShowLoader(false);
-            shabadsLoadedRef.current = true; // Update ref when shabads are loaded
+            shabadsLoadedRef.current = true;
         }
     }, [shabads]);
 
-    // Show live transcription as subtitle during loading (FILTERED)
     useEffect(() => {
-        // Immediately clear subtitle if max no-speech errors reached
         if (noSpeechCount >= 3) {
             setSubtitleText('');
             return;
         }
-
         if (showLoader && !showMatchedSubtitle && !shabadsLoadedRef.current && noSpeechCount < 3) {
-            // Use pre-filtered text from speech recognition hook
             const subtitle = (transcribedText + ' ' + interimTranscript).trim();
             setSubtitleText(subtitle);
         }
     }, [transcribedText, interimTranscript, showLoader, showMatchedSubtitle, noSpeechCount]);
 
-    // When SGGS match is found, show matched text as subtitle, then transition
     useEffect(() => {
         if (showLoader && lastSggsMatchFound && lastBestSggsMatch) {
             setShowMatchedSubtitle(true);
@@ -228,24 +171,21 @@ function BaniCore({ mode }: BaniCoreProps) {
         }
     }, [showLoader, lastSggsMatchFound, lastBestSggsMatch]);
 
-    // Function to reset transcription state (for future use)
     const resetTranscriptionState = useCallback(() => {
         setShabads([]);
-        resetTranscription(); // Use the hook's reset function
+        resetTranscription();
         setLastSggsMatchFound(null);
         setLastBestSggsMatch(null);
         setShowLoader(true);
         shabadsLoadedRef.current = false;
-        transcriptionSentRef.current = false; // Reset transcription sent flag
-        wordCountTriggeredRef.current = false; // Reset word count trigger flag
+        transcriptionSentRef.current = false;
+        wordCountTriggeredRef.current = false;
     }, [resetTranscription]);
 
-    // Automatically start speech recognition on mount - SpeechRecognitionManager handles all restarts internally
     useEffect(() => {
         startSpeechRecognition();
     }, [startSpeechRecognition]);
 
-    // Expose reset function for development/testing
     useEffect(() => {
         if (process.env.NODE_ENV === 'development') {
             (window as any).resetBaniAI = resetTranscriptionState;
@@ -256,7 +196,6 @@ function BaniCore({ mode }: BaniCoreProps) {
         }
     }, [resetTranscriptionState, returnToLoadingOverlay]);
 
-    // Callback to fetch next shabad
     const handleNeedNextShabad = useCallback(async () => {
         const lastShabad = shabads[shabads.length - 1];
         const nextShabadId = lastShabad?.navigation?.next;
@@ -322,7 +261,6 @@ function BaniCore({ mode }: BaniCoreProps) {
                         </div>
                     </header>
 
-                    {/* Sticky Pills + Buttons Row */}
                     {shabads.length > 0 && (
                         <div className="sticky-header-row">
                             <div className="sticky-header-left">
@@ -337,13 +275,11 @@ function BaniCore({ mode }: BaniCoreProps) {
                     )}
 
                     <main className="App-main">
-                        {/* Show Full Shabad box if present */}
                         {shabads.length > 0 && (
                             <div className="panel-header search-results" style={{ marginBottom: '2rem' }}>
                                 <FullShabadDisplay
                                     shabads={shabads}
                                     transcribedText={(() => {
-                                        // Use pre-filtered text from speech recognition hook
                                         const combined = (transcribedText + ' ' + interimTranscript).trim();
                                         const words = combined.split(/\s+/);
                                         const last4Words = words.slice(-4).join(' ');
