@@ -120,7 +120,8 @@ function BaniCore({ mode }: BaniCoreProps) {
                             shabadsBeingFetched.current.add(newShabadId);
                             try {
                                 const shabadData = await banidbService.getFullShabad(newShabadId);
-                                setShabads(prev => [...prev, shabadData]);
+                                //setShabads(prev => [...prev, shabadData]);
+                                setShabads([shabadData]);
                             } catch (err) {
                                 console.error('Error fetching full shabad:', err);
                             } finally {
