@@ -3,7 +3,7 @@
 ## Technologies Used
 - **Backend**: Python 3.8+, FastAPI, httpx, aiofiles, rapidfuzz, uvicorn, SQLite
 - **Frontend**: React, TypeScript, Web Speech API, HTTP REST API
-- **Database**: SQLite (local `shabads_verses_SGGS.db`), External BaniDB API
+- **Database**: SQLite (local `shabads_verses_Optimised_SGGS_window8words_step2_byShabad.db`), External BaniDB API
 - **Audio Processing**: Web Speech API (browser), file uploads (backend)
 - **Search Algorithms**: Levenshtein distance, sequence matching, token-level similarity
 
@@ -12,7 +12,7 @@
 - Node.js 16+ and npm for frontend
 - Start scripts: `start.sh` for unified startup
 - Backend runs on http://localhost:8000, frontend on http://localhost:3000
-- SQLite database: `backend/uploads/shabads_verses_SGGS.db`
+- SQLite database: `backend/uploads/shabads_verses_Optimised_SGGS_window8words_step2_byShabad.db`
 
 ## Technical Constraints
 - No persistent user authentication (MVP)

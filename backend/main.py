@@ -44,23 +44,26 @@ app.add_middleware(
 # --- Database Fuzzy Search Setup ---
 from pathlib import Path
 
-DATABASE_PATH = Path(__file__).parent / "uploads" / "shabads_verses_SGGS.db"
+DATABASE_PATH = Path(__file__).parent / "uploads" / "shabads_verses_Optimised_SGGS_window8words_step2_byShabad.db"
+FOUR_WORD_DATABASE_PATH = Path(__file__).parent / "uploads" / "shabads_verses_cleaned_atLeast_FOUR_words.db"
 VERSES_DATA = []  # List of (ShabadID, GurmukhiUni) tuples
+VERSES_DATA_4WORDS = []  # List of (ShabadID, GurmukhiUni) for repetitive-query search
 DATABASE_LOADED = False
+DATABASE_4WORDS_LOADED = False
 FUZZY_THRESHOLD = float(os.getenv("FUZZY_MATCH_THRESHOLD", "60"))
+REPETITION_RATIO_THRESHOLD = 80  # first_half vs second_half ratio above this => treat as repetitive
 
 # Async loading of database verses
 async def load_database_verses():
-    """Asynchronously load all verses from SQLite database"""
-    global VERSES_DATA, DATABASE_LOADED
-    
+    """Asynchronously load all verses from SQLite databases (main + 4-word for repetitive handling)"""
+    global VERSES_DATA, VERSES_DATA_4WORDS, DATABASE_LOADED, DATABASE_4WORDS_LOADED
+
     if DATABASE_PATH.exists():
         try:
             async with aiosqlite.connect(DATABASE_PATH) as db:
                 async with db.execute("SELECT ShabadID, GurmukhiUni FROM Verse") as cursor:
                     rows = await cursor.fetchall()
                     VERSES_DATA = [(row[0], unicodedata.normalize('NFC', row[1])) for row in rows]
-            
             DATABASE_LOADED = True
             logger.info(f"Loaded {len(VERSES_DATA)} verses from database for fuzzy search.")
         except Exception as e:
@@ -69,11 +72,25 @@ async def load_database_verses():
     else:
         logger.warning(f"Database not found at {DATABASE_PATH}. Fuzzy search will be disabled.")
 
+    if FOUR_WORD_DATABASE_PATH.exists():
+        try:
+            async with aiosqlite.connect(FOUR_WORD_DATABASE_PATH) as db:
+                async with db.execute("SELECT ShabadID, GurmukhiUni FROM Verse") as cursor:
+                    rows = await cursor.fetchall()
+                    VERSES_DATA_4WORDS = [(row[0], unicodedata.normalize('NFC', row[1])) for row in rows]
+            DATABASE_4WORDS_LOADED = True
+            logger.info(f"Loaded {len(VERSES_DATA_4WORDS)} verses from 4-word database for repetitive-query search.")
+        except Exception as e:
+            logger.error(f"Error loading 4-word database: {e}")
+            DATABASE_4WORDS_LOADED = False
+    else:
+        logger.warning(f"4-word database not found at {FOUR_WORD_DATABASE_PATH}. Repetitive-query path disabled.")
+
 
 
 @lru_cache(maxsize=1000)
 def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
-    """Fuzzy search with sliding windows using database verses - BATCH OPTIMIZED"""
+    """Fuzzy search using database verses - batch scoring with fuzz.ratio"""
     logger.info(f"DEBUG SEARCH: Starting search for query='{query}', threshold={threshold}")
     
     if not DATABASE_LOADED or not query.strip():
@@ -81,7 +98,31 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
         return None, None, None
     
     normalized_query = unicodedata.normalize('NFC', query.strip())
-    
+    words = normalized_query.split()
+
+    # Repetitive transcription: split 8-word query into two halves of 4; if halves are very similar, search first half only with partial_ratio on 4-word DB
+    if len(words) >= 8:
+        first_half = " ".join(words[0:4])
+        second_half = " ".join(words[4:8])
+        half_ratio = fuzz.ratio(first_half, second_half)
+        if half_ratio > REPETITION_RATIO_THRESHOLD and DATABASE_4WORDS_LOADED:
+            logger.info(f"DEBUG SEARCH: Repetitive query detected (halves ratio={half_ratio:.1f} > {REPETITION_RATIO_THRESHOLD}). Searching first half with partial_ratio on 4-word DB.")
+            verse_texts_4 = [v[1] for v in VERSES_DATA_4WORDS]
+            batch_results = process.extract(
+                first_half,
+                verse_texts_4,
+                scorer=fuzz.partial_ratio,
+                limit=len(verse_texts_4),
+                score_cutoff=0,
+            )
+            if batch_results:
+                verse_text, score, original_index = batch_results[0]
+                best_shabad_id = VERSES_DATA_4WORDS[original_index][0]
+                logger.info(f"DEBUG SEARCH: Best partial_ratio match - ShabadID: {best_shabad_id}, score: {score:.2f} | '{verse_text}'")
+                if score >= threshold:
+                    return verse_text, best_shabad_id, score
+                return None, None, None
+
     # Step 1: Batch process all verses using rapidfuzz.process for optimal performance
     logger.info(f"DEBUG SEARCH: Step 1 - Batch scoring all {len(VERSES_DATA)} verses with rapidfuzz.process")
     
@@ -99,99 +140,19 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
     )
     
     # Convert batch results back to our format with original indices and shabad_ids
+    # Results from process.extract are already sorted by score (descending)
     all_scores = []
     for verse_text, score, original_index in batch_results:
         shabad_id = VERSES_DATA[original_index][0]  # Get shabad_id from original data
         all_scores.append((original_index, shabad_id, verse_text, score))
     
-    # Results from process.extract are already sorted by score (descending), so just take top 3
-    top_3 = all_scores[:3]
-    
-    logger.info("DEBUG SEARCH: Step 2 - Top 3 results by ratio score:")
-    for rank, (verse_idx, shabad_id, verse_text, score) in enumerate(top_3, 1):
-        logger.info(f"DEBUG SEARCH:   {rank}. Verse {verse_idx} (ShabadID: {shabad_id}): {score:.2f} | '{verse_text}'")
-    
-    # Step 3: Generate sliding windows for each top verse
-    logger.info("DEBUG SEARCH: Step 3 - Generating sliding windows for top 3 verses")
-    seen_spans = set()
-    window_candidates = []
-    
-    for rank, (verse_idx, shabad_id, verse_text, original_score) in enumerate(top_3, 1):
-        logger.info(f"DEBUG SEARCH: Processing rank {rank} verse {verse_idx} (score: {original_score:.2f})")
-        
-        # Generate all window types for this verse
-        windows = []
-        
-        # Single-verse: the top verse
-        windows.append((verse_idx, verse_idx, "single"))
-        
-        # Double-verse forward: (i, i+1)
-        if verse_idx + 1 < len(VERSES_DATA):
-            windows.append((verse_idx, verse_idx + 1, "double_fwd"))
-        
-        # Double-verse backward: (i-1, i)
-        if verse_idx - 1 >= 0:
-            windows.append((verse_idx - 1, verse_idx, "double_bwd"))
-        
-        # Triple centered: (i-1, i, i+1)
-        if verse_idx - 1 >= 0 and verse_idx + 1 < len(VERSES_DATA):
-            windows.append((verse_idx - 1, verse_idx + 1, "triple_center"))
-        
-        # Triple forward: (i, i+1, i+2)
-        if verse_idx + 2 < len(VERSES_DATA):
-            windows.append((verse_idx, verse_idx + 2, "triple_fwd"))
-        
-        # Triple backward: (i-2, i-1, i)
-        if verse_idx - 2 >= 0:
-            windows.append((verse_idx - 2, verse_idx, "triple_bwd"))
-        
-        # logger.info(f"DEBUG SEARCH:   Generated {len(windows)} windows for verse {verse_idx}")
-        
-        # Score each window and avoid duplicates
-        for start_idx, end_idx, window_type in windows:
-            span_key = (start_idx, end_idx)
-            
-            if span_key not in seen_spans:
-                seen_spans.add(span_key)
-                
-                # Create span text
-                if start_idx == end_idx:
-                    span_text = VERSES_DATA[start_idx][1]
-                    span_shabad_id = VERSES_DATA[start_idx][0]
-                else:
-                    span_verses = [VERSES_DATA[i][1] for i in range(start_idx, end_idx + 1)]
-                    span_text = " ".join(span_verses)
-                    # Use the ShabadID of the original matching verse
-                    span_shabad_id = shabad_id
-                
-                # Score the span using weighted scoring: 0.3*ratio + 0.4*partial_ratio + 0.3*token_set_ratio
-                ratio_score = fuzz.ratio(normalized_query, span_text)
-                partial_ratio_score = fuzz.partial_ratio(normalized_query, span_text)
-                token_set_score = fuzz.token_set_ratio(normalized_query, span_text)
-                span_score = 0.3 * ratio_score + 0.4 * partial_ratio_score + 0.3 * token_set_score
-                
-                # Store the original verse that generated this window
-                original_verse = verse_text  # The verse from top 3 that generated this window
-                
-                window_candidates.append((original_verse, span_shabad_id, span_score, window_type, start_idx, end_idx, verse_idx))
-                
-               # logger.info(f"DEBUG SEARCH:     {window_type} ({start_idx}-{end_idx}): {span_score:.2f} (ratio: {ratio_score:.1f}, partial: {partial_ratio_score:.1f}, token_set: {token_set_score:.1f}) | '{span_text[:60]}...'")
-            else:
-                logger.info(f"DEBUG SEARCH:     {window_type} ({start_idx}-{end_idx}): DUPLICATE - skipped")
-    
-    # Step 4: Find the highest scoring window
-    if not window_candidates:
-        logger.info("DEBUG SEARCH: No window candidates generated")
+    # Best candidate is the highest fuzz.ratio score from batch verse scoring (first result)
+    if not all_scores:
+        logger.info("DEBUG SEARCH: No results from batch scoring")
         return None, None, None
     
-    window_candidates.sort(key=lambda x: x[2], reverse=True)
-    best_verse, best_shabad_id, best_score, best_type, best_start, best_end, original_verse_idx = window_candidates[0]
-    
-    logger.info("DEBUG SEARCH: Step 4 - Final window results (top 5):")
-    for i, (verse_text, shabad_id, score, window_type, start_idx, end_idx, orig_idx) in enumerate(window_candidates[:5], 1):
-        logger.info(f"DEBUG SEARCH:   {i}. {window_type} ({start_idx}-{end_idx}) from original verse {orig_idx}: {score:.2f} , (ShabadID: {shabad_id}) | '{verse_text[:60]}...'")
-    
-    logger.info(f"DEBUG SEARCH: FINAL RESULT - Best window: {best_type} ({best_start}-{best_end}) with score {best_score:.2f} , Returning ShabadID {best_shabad_id} with verse: '{best_verse}'")
+    verse_idx, best_shabad_id, best_verse, best_score = all_scores[0]
+    logger.info(f"DEBUG SEARCH: Best match - Verse {verse_idx} (ShabadID: {best_shabad_id}): {best_score:.2f} | '{best_verse}'")
 
     # Return the best result if above threshold
     if best_score >= threshold:
@@ -206,7 +167,7 @@ def fuzzy_search_database(query: str, threshold: float = FUZZY_THRESHOLD):
 
 @app.get("/")
 async def root():
-    return {"message": "Bani AI Transcription API"}
+    return {"message": "Waheguru ji ka Khalsa, Waheguru ji ki Fateh - Bani AI Transcription API"}
 
 @app.get("/api/health")
 async def health_check():
@@ -272,7 +233,7 @@ async def test_database_search_endpoint(query: str):
         } if best_verse else None,
         "configuration": {
             "fuzzy_threshold": FUZZY_THRESHOLD,
-            "weighted_scoring": "0.3*ratio + 0.4*partial_ratio + 0.3*token_set_ratio"
+            "scorer": "fuzz.ratio"
         }
     }
 
