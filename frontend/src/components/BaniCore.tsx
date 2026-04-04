@@ -238,8 +238,10 @@ function BaniCore({ mode }: BaniCoreProps) {
                 subtitle={showLoader ? subtitleText : undefined}
             />
             <SacredWordOverlay
+                key={sacredWordOverlay.key}
                 isVisible={sacredWordOverlay.isVisible}
                 sacredWord={sacredWordOverlay.sacredWord}
+                overlayKey={sacredWordOverlay.key}
             />
             <div style={{ display: showLoader ? 'none' : 'block' }}>
                 <div className="App">

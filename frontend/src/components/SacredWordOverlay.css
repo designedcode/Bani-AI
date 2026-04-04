@@ -1,96 +1,104 @@
+/*
+ * Sacred Word Overlay
+ * -------------------
+ * No CSS transitions — everything is driven by keyframe animations so the
+ * overlay appears instantly and fades out smoothly at the end.
+ * The parent increments `overlayKey` which remounts this element, resetting
+ * all animations to frame 0 with zero delay.
+ */
+
 .sacred-word-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
+  inset: 0;                          /* top/right/bottom/left: 0 */
   width: 100vw;
   height: 100vh;
-  background: rgba(0, 0, 0, 0.85);
-  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  opacity: 0;
-  transform: scale(0.95);
-  pointer-events: none;
+  pointer-events: none;              /* never blocks interaction */
+
+  /* Sharp appear: animate from the moment the element exists */
+  background: transparent;
+  animation: overlayBgIn 0.08s ease-out forwards;
 }
 
+/* Visible state — plays the full sequence */
 .sacred-word-overlay.visible {
-  opacity: 1;
-  transform: scale(1);
-  pointer-events: auto;
-}
-
-.sacred-word-overlay.hidden {
-  opacity: 0;
-  transform: scale(0.95);
   pointer-events: none;
 }
 
+/* Hiding state — fade everything out */
+.sacred-word-overlay.hiding {
+  animation: overlayBgOut 0.35s ease-in forwards;
+}
+
+/* ── Background fade-in (very fast - 80ms) ─────────────────────────────── */
+@keyframes overlayBgIn {
+  from { background: rgba(0, 0, 0, 0); backdrop-filter: blur(0px); }
+  to   { background: rgba(0, 0, 0, 0.82); backdrop-filter: blur(8px); }
+}
+
+/* ── Background fade-out ───────────────────────────────────────────────── */
+@keyframes overlayBgOut {
+  from { background: rgba(0, 0, 0, 0.82); backdrop-filter: blur(8px); opacity: 1; }
+  to   { background: rgba(0, 0, 0, 0);    backdrop-filter: blur(0px);  opacity: 0; }
+}
+
+/* ── Content container ─────────────────────────────────────────────────── */
 .sacred-word-content {
   text-align: center;
   color: white;
-  animation: fadeInUp 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  /* Slides up and snaps into place in 120ms */
+  animation: contentIn 0.12s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
+@keyframes contentIn {
+  from {
+    opacity: 0;
+    transform: translateY(22px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ── Ik Onkar symbol ───────────────────────────────────────────────────── */
 .sacred-word-symbol {
   font-size: 4rem;
   margin-bottom: 1rem;
   color: #ffb347;
-  text-shadow: 0 0 20px rgba(255, 179, 71, 0.5);
-  animation: glow 2s ease-in-out infinite alternate;
+  text-shadow:
+    0 0 20px rgba(255, 179, 71, 0.6),
+    0 0 40px rgba(255, 179, 71, 0.3);
+  animation: symbolGlow 1.8s ease-in-out infinite alternate;
 }
 
+@keyframes symbolGlow {
+  from { text-shadow: 0 0 18px rgba(255, 179, 71, 0.5); }
+  to   { text-shadow: 0 0 38px rgba(255, 179, 71, 0.9), 0 0 60px rgba(255, 200, 100, 0.35); }
+}
+
+/* ── Sacred word text ──────────────────────────────────────────────────── */
 .sacred-word-text {
   font-size: 2.5rem;
   font-weight: 600;
   line-height: 1.4;
   max-width: 80vw;
   word-wrap: break-word;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
   font-family: 'Noto Sans Gurmukhi', sans-serif;
+  letter-spacing: 0.02em;
 }
 
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes glow {
-  from {
-    text-shadow: 0 0 20px rgba(255, 179, 71, 0.5);
-  }
-  to {
-    text-shadow: 0 0 30px rgba(255, 179, 71, 0.8);
-  }
-}
-
-/* Responsive design */
+/* ── Responsive ─────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
-  .sacred-word-symbol {
-    font-size: 3rem;
-  }
-  
-  .sacred-word-text {
-    font-size: 2rem;
-    max-width: 90vw;
-  }
+  .sacred-word-symbol { font-size: 3rem; }
+  .sacred-word-text   { font-size: 2rem; max-width: 90vw; }
 }
 
 @media (max-width: 480px) {
-  .sacred-word-symbol {
-    font-size: 2.5rem;
-  }
-  
-  .sacred-word-text {
-    font-size: 1.5rem;
-    max-width: 95vw;
-  }
+  .sacred-word-symbol { font-size: 2.5rem; }
+  .sacred-word-text   { font-size: 1.5rem; max-width: 95vw; }
 }

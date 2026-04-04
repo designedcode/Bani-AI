@@ -17,7 +17,7 @@ interface UseSpeechRecognitionReturn {
   resetTranscription: () => void;
   setAutoRestart: (enabled: boolean) => void;
   isAutoRestartEnabled: boolean;
-  sacredWordOverlay: { isVisible: boolean; sacredWord: string };
+  sacredWordOverlay: { isVisible: boolean; sacredWord: string; key: number };
 }
 
 export function useSpeechRecognition(isDisplayingResults: boolean = false): UseSpeechRecognitionReturn {
