@@ -51,6 +51,8 @@ class TranscriptionService {
     };
 
     try {
+      console.log('🎤 Sending to backend:', text);
+
       // Step 1: Get SGGS fuzzy match and shabad_id from backend
       const response = await fetch(`${this.baseUrl}/api/transcribe`, {
         method: 'POST',
@@ -65,6 +67,7 @@ class TranscriptionService {
       }
 
       const backendData: TranscriptionResponse = await response.json();
+      console.log('📥 Backend Shabad ID:', backendData.shabad_id);
 
       // Step 2: Create results directly from backend shabad_id (no BaniDB search needed)
       let results: SearchResult[] = [];
