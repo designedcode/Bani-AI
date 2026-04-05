@@ -50,117 +50,110 @@ function BaniCore({ mode }: BaniCoreProps) {
         sacredWordOverlay
     } = useSpeechRecognition(shabads.length > 0);
 
-    // Send transcription: kirtan = two-step confirmation; paath = single send and show
-    const sendTranscription = useCallback(async (text: string, confidence: number) => {
-        if (noSpeechCount >= 3) return;
-        if (transcriptionSentRef.current) return;
-        if (isProcessing) return;
-        if (mode === 'kirtan' && kirtanConfirmedRef.current) return;
-        // In kirtan we keep sending for second detection; in paath stop once shabads are loaded
-        if (mode !== 'kirtan' && (shabadsLoadedRef.current || searchTriggered)) return;
+    type ShabadMergeMode = 'append' | 'replace';
 
-        try {
-            setIsProcessing(true);
-            transcriptionSentRef.current = true;
-
-            const response = await transcriptionService.transcribeAndSearch(text, confidence);
-
-            if (!response.results || response.results.length === 0) {
-                transcriptionSentRef.current = false;
-                if (mode === 'paath') wordCountTriggeredRef.current = false;
-                setIsProcessing(false);
+    const fetchAndAttachShabad = useCallback(
+        async (newShabadId: number, merge: ShabadMergeMode) => {
+            if (shabads.some(s => s.shabad_id === newShabadId) || shabadsBeingFetched.current.has(newShabadId)) {
                 return;
             }
-
-            const newShabadId = response.results[0].shabad_id;
-
-            if (mode === 'kirtan') {
-                // ---- KIRTAN: two-step confirmation ----
-                if (previousShabadId === null) {
-                    // First detection: show shabad immediately, store ID, wait for next 8 words
-                    setPreviousShabadId(newShabadId);
-                    setLastSggsMatchFound(response.sggs_match_found ?? null);
-                    setLastBestSggsMatch(response.best_sggs_match ?? null);
-                    if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
-                        shabadsBeingFetched.current.add(newShabadId);
-                        try {
-                            const shabadData = await banidbService.getFullShabad(newShabadId);
-                            setShabads(prev => [...prev, shabadData]);
-                        } catch (err) {
-                            console.error('Error fetching full shabad:', err);
-                        } finally {
-                            shabadsBeingFetched.current.delete(newShabadId);
-                        }
-                    }
+            shabadsBeingFetched.current.add(newShabadId);
+            try {
+                const shabadData = await banidbService.getFullShabad(newShabadId);
+                if (merge === 'replace') {
+                    setShabads([shabadData]);
                 } else {
-                    // Second detection (or onward)
-                    if (previousShabadId === newShabadId) {
-                        // Match confirmed: stop sending until reset
-                        kirtanConfirmedRef.current = true;
-                        setPreviousShabadId(null);
-                        setLastSggsMatchFound(response.sggs_match_found ?? null);
-                        setLastBestSggsMatch(response.best_sggs_match ?? null);
-                        if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
-                            shabadsBeingFetched.current.add(newShabadId);
-                            try {
-                                const shabadData = await banidbService.getFullShabad(newShabadId);
-                                setShabads(prev => [...prev, shabadData]);
-                            } catch (err) {
-                                console.error('Error fetching full shabad:', err);
-                            } finally {
-                                shabadsBeingFetched.current.delete(newShabadId);
-                            }
-                        }
-                    } else {
-                        // Mismatch: show new shabad, set as new previous, continue second-detection flow
+                    setShabads(prev => [...prev, shabadData]);
+                }
+            } catch (err) {
+                console.error('Error fetching full shabad:', err);
+            } finally {
+                shabadsBeingFetched.current.delete(newShabadId);
+            }
+        },
+        [shabads]
+    );
+
+    // Send transcription: kirtan = two-step confirmation; paath = single send and show
+    const sendTranscription = useCallback(
+        async (text: string, confidence: number, opts?: { kirtanBatchWordCount?: number }) => {
+            if (noSpeechCount >= 3) return;
+            if (transcriptionSentRef.current) return;
+            if (isProcessing) return;
+            if (mode === 'kirtan' && kirtanConfirmedRef.current) return;
+            // In kirtan we keep sending for second detection; in paath stop once shabads are loaded
+            if (mode !== 'kirtan' && (shabadsLoadedRef.current || searchTriggered)) return;
+
+            try {
+                setIsProcessing(true);
+                transcriptionSentRef.current = true;
+
+                const response = await transcriptionService.transcribeAndSearch(text, confidence);
+
+                if (!response.results || response.results.length === 0) {
+                    transcriptionSentRef.current = false;
+                    if (mode === 'paath') wordCountTriggeredRef.current = false;
+                    setUserMessage('No results found. Refreshing...');
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                    return;
+                }
+
+                if (mode === 'kirtan' && opts?.kirtanBatchWordCount != null) {
+                    processedWordCountRef.current += opts.kirtanBatchWordCount;
+                }
+
+                const newShabadId = response.results[0].shabad_id;
+
+                if (mode === 'kirtan') {
+                    // ---- KIRTAN: two-step confirmation ----
+                    if (previousShabadId === null) {
+                        // First detection: show shabad immediately, store ID, wait for next 8 words
                         setPreviousShabadId(newShabadId);
                         setLastSggsMatchFound(response.sggs_match_found ?? null);
                         setLastBestSggsMatch(response.best_sggs_match ?? null);
-                        if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
-                            shabadsBeingFetched.current.add(newShabadId);
-                            try {
-                                const shabadData = await banidbService.getFullShabad(newShabadId);
-                                setShabads([shabadData]);
-                            } catch (err) {
-                                console.error('Error fetching full shabad:', err);
-                            } finally {
-                                shabadsBeingFetched.current.delete(newShabadId);
-                            }
+                        await fetchAndAttachShabad(newShabadId, 'append');
+                    } else {
+                        // Second detection (or onward)
+                        if (previousShabadId === newShabadId) {
+                            // Match confirmed: stop sending until reset
+                            kirtanConfirmedRef.current = true;
+                            setPreviousShabadId(null);
+                            setLastSggsMatchFound(response.sggs_match_found ?? null);
+                            setLastBestSggsMatch(response.best_sggs_match ?? null);
+                            await fetchAndAttachShabad(newShabadId, 'append');
+                        } else {
+                            // Mismatch: show new shabad, set as new previous, continue second-detection flow
+                            setPreviousShabadId(newShabadId);
+                            setLastSggsMatchFound(response.sggs_match_found ?? null);
+                            setLastBestSggsMatch(response.best_sggs_match ?? null);
+                            await fetchAndAttachShabad(newShabadId, 'replace');
                         }
                     }
+                } else {
+                    // ---- PAATH: single send and show ----
+                    setLastSggsMatchFound(response.sggs_match_found ?? null);
+                    setLastBestSggsMatch(response.best_sggs_match ?? null);
+                    await fetchAndAttachShabad(newShabadId, 'append');
                 }
-            } else {
-                // ---- PAATH: single send and show ----
-                setLastSggsMatchFound(response.sggs_match_found ?? null);
-                setLastBestSggsMatch(response.best_sggs_match ?? null);
-                if (!shabads.some(s => s.shabad_id === newShabadId) && !shabadsBeingFetched.current.has(newShabadId)) {
-                    shabadsBeingFetched.current.add(newShabadId);
-                    try {
-                        const shabadData = await banidbService.getFullShabad(newShabadId);
-                        setShabads(prev => [...prev, shabadData]);
-                    } catch (err) {
-                        console.error('Error fetching full shabad:', err);
-                    } finally {
-                        shabadsBeingFetched.current.delete(newShabadId);
-                    }
-                }
-            }
 
-            transcriptionSentRef.current = false;
-            if (mode === 'paath') wordCountTriggeredRef.current = false;
-        } catch (err) {
-            console.error('Transcription error:', err);
-            if (err instanceof Error && err.message.includes('No results found - page will refresh')) {
-                setUserMessage('No results found. Refreshing...');
-            } else {
-                setUserMessage('Failed to process transcription');
+                transcriptionSentRef.current = false;
+                if (mode === 'paath') wordCountTriggeredRef.current = false;
+            } catch (err) {
+                console.error('Transcription error:', err);
+                transcriptionSentRef.current = false;
+                wordCountTriggeredRef.current = false;
+                setUserMessage('Could not complete search. Refreshing...');
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            } finally {
+                setIsProcessing(false);
             }
-            transcriptionSentRef.current = false;
-            wordCountTriggeredRef.current = false;
-        } finally {
-            setIsProcessing(false);
-        }
-    }, [shabads, searchTriggered, isProcessing, noSpeechCount, mode, previousShabadId]);
+        },
+        [fetchAndAttachShabad, searchTriggered, isProcessing, noSpeechCount, mode, previousShabadId]
+    );
 
     // Trigger transcription: kirtan = first 8 words then next 8; paath = single 8-word send
     useEffect(() => {
@@ -184,8 +177,7 @@ function BaniCore({ mode }: BaniCoreProps) {
                         processedWordCountRef.current + 8
                     );
                     const batchText = nextEight.join(' ');
-                    processedWordCountRef.current += 8;
-                    sendTranscription(batchText, 0.8);
+                    sendTranscription(batchText, 0.8, { kirtanBatchWordCount: nextEight.length });
                 }
             } else {
                 // Paath: single send when 8+ words

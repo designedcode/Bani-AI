@@ -1,7 +1,5 @@
 // Transcription service for REST API communication
 
-// Transcription service for REST API communication
-
 export interface TranscriptionRequest {
   text: string;
   confidence: number;
@@ -87,13 +85,8 @@ class TranscriptionService {
         console.log(`No good SGGS match found - no results`);
       }
 
-      // If no results found, refresh the page
       if (results.length === 0) {
-        console.log('No transcription results found, refreshing page...');
-        setTimeout(() => {
-          window.location.reload();
-        }, 1000); // Small delay to show any loading state
-        throw new Error('No results found - page will refresh');
+        console.log('No transcription results found (caller may refresh UI)');
       }
 
       return {
