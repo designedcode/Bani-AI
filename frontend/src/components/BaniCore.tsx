@@ -92,7 +92,11 @@ function BaniCore({ mode }: BaniCoreProps) {
 
                 if (!response.results || response.results.length === 0) {
                     transcriptionSentRef.current = false;
-                    if (mode === 'paath') wordCountTriggeredRef.current = false;
+                    // Paath: keep wordCountTriggeredRef true so the same accumulated text cannot
+                    // re-trigger send when sendTranscription's identity changes (isProcessing).
+                    if (mode === 'kirtan' && opts?.kirtanBatchWordCount != null) {
+                        processedWordCountRef.current += opts.kirtanBatchWordCount;
+                    }
                     setUserMessage('No results found. Refreshing...');
                     setTimeout(() => {
                         window.location.reload();
