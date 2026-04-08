@@ -1,3 +1,4 @@
+
 import { useCallback, useState, useRef, useEffect } from 'react';
 import { removeSacredWords } from '../services/sacredWordDetector';
 
@@ -37,13 +38,13 @@ const SACRED_PHRASES: SacredPhrase[] = [
   { priority: 0, overlayMs: 4000, displayText: 'ੴ ਸਤਿ ਨਾਮੁ ਕਰਤਾ ਪੁਰਖੁ ਨਿਰਭਉ ਨਿਰਵੈਰੁ', pattern: 'ਸਤਿਨਾਮੁ ਕਰਤਾ ਪੁਰਖ ਨਿਰਭਉ ਨਿਰਵੈਰੁ' },
   { priority: 0, overlayMs: 4000, displayText: 'ੴ ਸਤਿ ਨਾਮੁ ਕਰਤਾ ਪੁਰਖੁ ਨਿਰਭਉ ਨਿਰਵੈਰੁ', pattern: 'ਸਤਿਨਾਮ ਕਰਤਾ ਪੁਰਖ ਨਿਰਭਉ ਨਿਰਵੈਰ' },
   { priority: 0, overlayMs: 4000, displayText: 'ੴ ਸਤਿ ਨਾਮੁ ਕਰਤਾ ਪੁਰਖੁ ਨਿਰਭਉ ਨਿਰਵੈਰੁ', pattern: 'ਸਤਿ ਨਾਮ ਕਰਤਾ ਪੁਰਖ ਨਿਰਭਉ ਨਿਰਵੈਰ' },
-  { priority: 0, overlayMs: 4000, displayText: 'ੴ ਅਕਾਲ ਮੂਰਤਿ ਅਜੂਨੀ ਸੈਭੰ ਗੁਰ ਪ੍ਰਸਾਦਿ',                          pattern: 'ਅਕਾਲ ਮੂਰਤਿ ਅਜੂਨੀ ਸੈਭੰ ਗੁਰ ਪ੍ਰਸਾਦਿ' },
+  { priority: 0, overlayMs: 4000, displayText: 'ੴ ਅਕਾਲ ਮੂਰਤਿ ਅਜੂਨੀ ਸੈਭੰ ਗੁਰ ਪ੍ਰਸਾਦਿ', pattern: 'ਅਕਾਲ ਮੂਰਤਿ ਅਜੂਨੀ ਸੈਭੰ ਗੁਰ ਪ੍ਰਸਾਦਿ' },
 
   // ── Khalsa Fateh (priority 1) ────────────────────────────────────────────
   { priority: 1, overlayMs: 3000, displayText: 'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫਤਿਹ', pattern: 'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖ਼ਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫ਼ਤਿਹ', suppressPatterns: ['ਵਾਹਿਗੁਰੂ ਵਾਹਿਗੁਰੂ', 'ਵਾਹਿਗੁਰੂ'] },
   { priority: 1, overlayMs: 3000, displayText: 'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫਤਿਹ', pattern: 'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫਤਿਹ', suppressPatterns: ['ਵਾਹਿਗੁਰੂ ਵਾਹਿਗੁਰੂ', 'ਵਾਹਿਗੁਰੂ'] },
-  { priority: 1, overlayMs: 3000, displayText: 'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫਤਿਹ', pattern: 'ਜੀ ਕਾ ਖ਼ਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫ਼ਤਿਹ',          suppressPatterns: ['ਵਾਹਿਗੁਰੂ ਵਾਹਿਗੁਰੂ', 'ਵਾਹਿਗੁਰੂ'] },
-  { priority: 1, overlayMs: 3000, displayText: 'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫਤਿਹ', pattern: 'ਜੀ ਕਾ ਖਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫਤਿਹ',           suppressPatterns: ['ਵਾਹਿਗੁਰੂ ਵਾਹਿਗੁਰੂ', 'ਵਾਹਿਗੁਰੂ'] },
+  { priority: 1, overlayMs: 3000, displayText: 'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫਤਿਹ', pattern: 'ਜੀ ਕਾ ਖ਼ਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫ਼ਤਿਹ', suppressPatterns: ['ਵਾਹਿਗੁਰੂ ਵਾਹਿਗੁਰੂ', 'ਵਾਹਿਗੁਰੂ'] },
+  { priority: 1, overlayMs: 3000, displayText: 'ਵਾਹਿਗੁਰੂ ਜੀ ਕਾ ਖਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫਤਿਹ', pattern: 'ਜੀ ਕਾ ਖਾਲਸਾ ਵਾਹਿਗੁਰੂ ਜੀ ਕੀ ਫਤਿਹ', suppressPatterns: ['ਵਾਹਿਗੁਰੂ ਵਾਹਿਗੁਰੂ', 'ਵਾਹਿਗੁਰੂ'] },
 
   // ── Bole So Nihal (priority 2) ───────────────────────────────────────────
   { priority: 2, overlayMs: 2000, displayText: 'ਬੋਲੇ ਸੋ ਨਿਹਾਲ ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ', pattern: 'ਬੋਲੇ ਸੋ ਨਿਹਾਲ ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ' },
