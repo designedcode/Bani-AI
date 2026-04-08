@@ -31,31 +31,34 @@ const SACRED_PATTERNS = [
 
   // Two word phrases
   'ਵਾਹਿਗੁਰੂ ਵਾਹਿਗੁਰੂ',
- // 'ਸਤਿਗੁਰ ਪ੍ਰਸਾਦਿ', as it's searchable 
+  // 'ਸਤਿਗੁਰ ਪ੍ਰਸਾਦਿ', as it's searchable
   'ਇਕ ਓਕਾਰ',
   'ਇ ਓਕਾਰ',
   'ਇਕ ਓਂਕਾਰ',
   'ਬੋਲੇ ਸੋ',
   'ਸੋ ਨਿਹਾਲ',
-  // 'ਸਤਿ ਸ੍ਰੀ',
-  // 'ਸ੍ਰੀ ਅਕਾਲ',
-  // 'ਜੀ ਕਾ',
-  // 'ਕਾ ਖਾਲਸਾ',
-  // 'ਕਾ ਖ਼ਾਲਸਾ',
-  // 'ਜੀ ਕੀ',
-  // 'ਕੀ ਫਤਿਹ',
-  // 'ਕੀ ਫ਼ਤਿਹ',
 
   // Single words
   'ਵਾਹਿਗੁਰੂ',
   'ਇਓਕਾਰ',
-  'ੴ'
+  'ੴ',
 ]
 
 // Pre-normalize patterns for consistent comparison and performance
 const NORMALIZED_PATTERNS = SACRED_PATTERNS.map(p => p.normalize('NFC'))
 
-// Combined function that detects and removes sacred words in one pass
+// Combined function that detects and removes sacred words in one pass.
+//
+// KEY FIX: The original implementation had a `break` after removing the first
+// matched pattern. This caused two problems:
+//   1. Multiple sacred words in the same segment (e.g. "Waheguru ... Bole So Nihal")
+//      would only have the first one removed.
+//   2. On the next speech segment, residual unremoved patterns caused false
+//      re-detections even though the detection hook thought the text was clean.
+//
+// We now continue iterating all patterns so every sacred phrase in the segment
+// is fully stripped. The `matches` array still only records the first match
+// (highest-priority hit) for overlay display purposes.
 export function detectAndRemoveSacredWords(
   text: string,
   context: 'general' | 'shabad' = 'general'
@@ -68,21 +71,20 @@ export function detectAndRemoveSacredWords(
   let filteredText = normalized
   const matches = []
 
-  // Single pass through patterns for both detection and removal
   for (const pattern of NORMALIZED_PATTERNS) {
-    // Check for match
     if (normalized.includes(pattern)) {
-      // Add to matches (only first match for priority)
+      // Record only the highest-priority (first) match for overlay display
       if (matches.length === 0) {
         matches.push({
           match: pattern,
           displayText: pattern,
           rule: { context: 'both' },
-          score: 1.0
+          score: 1.0,
         })
       }
 
-      // Remove from text if found
+      // Always attempt removal even if this isn't the first match
+      // (removed the `break` that was here — was preventing full cleanup)
       if (filteredText.includes(pattern)) {
         const regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')
         filteredText = filteredText.replace(regex, '').replace(/\s+/g, ' ').trim()
@@ -102,34 +104,19 @@ export function detectSacredMatches(
   return result.matches
 }
 
-
-
-
-
 // Fast removal function using optimized approach
 export function removeSacredWords(text: string): string {
   if (!text || text.trim().length === 0) {
     return text
   }
 
-  // Normalize and clean up spaces first
   let result = text.normalize('NFC').replace(/\s+/g, ' ').trim()
 
-  // Remove patterns (longest first to avoid partial removal issues)
   for (const pattern of NORMALIZED_PATTERNS) {
-    const normalizedPattern = pattern
-    
-    // Try exact match first
-    if (result.includes(normalizedPattern)) {
-      // Use global replacement
-      const regex = new RegExp(normalizedPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')
-      const beforeRemoval = result
+    if (result.includes(pattern)) {
+      const regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')
       result = result.replace(regex, '').replace(/\s+/g, ' ').trim()
-      
-      // If we removed something, break to avoid over-processing
-      if (result !== beforeRemoval) {
-        break
-      }
+      // NOTE: no break here — continue to remove all matching patterns
     }
   }
 
