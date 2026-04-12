@@ -1,9 +1,4 @@
 import { transcriptionService } from '../transcriptionService';
-import { banidbService } from '../banidbService';
-
-// Mock the banidbService
-jest.mock('../banidbService');
-const mockedBanidbService = banidbService as jest.Mocked<typeof banidbService>;
 
 // Mock fetch
 global.fetch = jest.fn();
@@ -17,110 +12,82 @@ Object.defineProperty(window, 'location', {
   writable: true
 });
 
-describe('TranscriptionService Page Refresh Functionality', () => {
+describe('TranscriptionService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.clearAllTimers();
   });
 
-  it('should refresh page when no results are found', async () => {
-    jest.useFakeTimers();
-    
-    // Mock backend response with SGGS match but BaniDB returns no results
-    mockedFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        transcribed_text: 'test text',
-        confidence: 0.8,
-        sggs_match_found: true,
-        best_sggs_match: 'some match',
-        best_sggs_score: 80,
-        timestamp: Date.now()
-      })
-    } as Response);
-
-    // Mock BaniDB service to return no results
-    mockedBanidbService.searchFromSGGSLine.mockResolvedValueOnce([]);
-
-    // Attempt transcription
-    await expect(
-      transcriptionService.transcribeAndSearch('test text', 0.8)
-    ).rejects.toThrow('No results found - page will refresh');
-
-    // Fast-forward time to trigger the page refresh
-    jest.advanceTimersByTime(1000);
-
-    // Verify page refresh was called
-    expect(window.location.reload).toHaveBeenCalledTimes(1);
-    
-    jest.useRealTimers();
-  });
-
-  it('should not refresh page when results are found', async () => {
-    // Mock backend response with SGGS match
-    mockedFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        transcribed_text: 'test text',
-        confidence: 0.8,
-        sggs_match_found: true,
-        best_sggs_match: 'some match',
-        best_sggs_score: 80,
-        timestamp: Date.now()
-      })
-    } as Response);
-
-    // Mock BaniDB service to return results
-    mockedBanidbService.searchFromSGGSLine.mockResolvedValueOnce([{
-      gurmukhi_text: 'ਗੁਰਮੁਖੀ ਟੈਕਸਟ',
-      english_translation: 'English translation',
-      verse_id: 1,
-      shabad_id: 1,
-      source: 'SGGS',
-      writer: 'Guru Nanak Dev Ji',
-      raag: 'Asa'
-    }]);
-
-    // Attempt transcription
-    const result = await transcriptionService.transcribeAndSearch('test text', 0.8);
-
-    // Verify results were returned and no page refresh was triggered
-    expect(result.results).toHaveLength(1);
-    expect(window.location.reload).not.toHaveBeenCalled();
-  });
-
-  it('should refresh page when no SGGS match is found', async () => {
-    jest.useFakeTimers();
-    
-    // Mock backend response with no SGGS match
+  it('returns empty results when no SGGS match (no reload in service)', async () => {
     mockedFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
         transcribed_text: 'test text',
         confidence: 0.8,
         sggs_match_found: false,
-        best_sggs_match: null,
+        shabad_id: 0,
+        best_sggs_match: '',
         best_sggs_score: null,
         timestamp: Date.now()
       })
     } as Response);
 
-    // No BaniDB service call should be made when no SGGS match
+    const result = await transcriptionService.transcribeAndSearch('test text', 0.8);
 
-    // Attempt transcription
+    expect(result.results).toHaveLength(0);
+    expect(window.location.reload).not.toHaveBeenCalled();
+  });
+
+  it('returns empty results when SGGS match but no shabad_id', async () => {
+    mockedFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        transcribed_text: 'test text',
+        confidence: 0.8,
+        sggs_match_found: true,
+        shabad_id: 0,
+        best_sggs_match: 'some match',
+        best_sggs_score: 80,
+        timestamp: Date.now()
+      })
+    } as Response);
+
+    const result = await transcriptionService.transcribeAndSearch('test text', 0.8);
+
+    expect(result.results).toHaveLength(0);
+    expect(window.location.reload).not.toHaveBeenCalled();
+  });
+
+  it('returns results when SGGS match and shabad_id present', async () => {
+    mockedFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        transcribed_text: 'test text',
+        confidence: 0.8,
+        sggs_match_found: true,
+        shabad_id: 42,
+        best_sggs_match: 'some match',
+        best_sggs_score: 80,
+        timestamp: Date.now()
+      })
+    } as Response);
+
+    const result = await transcriptionService.transcribeAndSearch('test text', 0.8);
+
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].shabad_id).toBe(42);
+    expect(window.location.reload).not.toHaveBeenCalled();
+  });
+
+  it('throws on HTTP error (caller may refresh)', async () => {
+    mockedFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500
+    } as Response);
+
     await expect(
       transcriptionService.transcribeAndSearch('test text', 0.8)
-    ).rejects.toThrow('No results found - page will refresh');
+    ).rejects.toThrow('HTTP error! status: 500');
 
-    // Verify BaniDB service was not called
-    expect(mockedBanidbService.searchFromSGGSLine).not.toHaveBeenCalled();
-
-    // Fast-forward time to trigger the page refresh
-    jest.advanceTimersByTime(1000);
-
-    // Verify page refresh was called
-    expect(window.location.reload).toHaveBeenCalledTimes(1);
-    
-    jest.useRealTimers();
+    expect(window.location.reload).not.toHaveBeenCalled();
   });
 });

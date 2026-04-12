@@ -227,7 +227,6 @@ function progressiveFuzzySearch(
   }
 }
 
-
 const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcribedText, onNeedNextShabad }) => {
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [highlightedLineIndex, setHighlightedLineIndex] = useState<number | null>(null);
@@ -240,6 +239,10 @@ const FullShabadDisplay: React.FC<FullShabadDisplayProps> = ({ shabads, transcri
   useEffect(() => {
     candidatePersistenceRef.current = { candidate: null, count: 0 };
     nextShabadRequestedRef.current = null;
+
+        // Reset highlight so search starts in the new shabad
+  setHighlightedLineIndex(null);
+    
   }, [shabads]);
 
   // Flatten all lines from all shabads

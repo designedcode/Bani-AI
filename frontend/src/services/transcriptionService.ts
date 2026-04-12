@@ -1,7 +1,5 @@
 // Transcription service for REST API communication
 
-// Transcription service for REST API communication
-
 export interface TranscriptionRequest {
   text: string;
   confidence: number;
@@ -53,6 +51,8 @@ class TranscriptionService {
     };
 
     try {
+      console.log('🎤 Sending to backend:', text);
+
       // Step 1: Get SGGS fuzzy match and shabad_id from backend
       const response = await fetch(`${this.baseUrl}/api/transcribe`, {
         method: 'POST',
@@ -67,6 +67,7 @@ class TranscriptionService {
       }
 
       const backendData: TranscriptionResponse = await response.json();
+      console.log('📥 Backend Shabad ID:', backendData.shabad_id);
 
       // Step 2: Create results directly from backend shabad_id (no BaniDB search needed)
       let results: SearchResult[] = [];
@@ -87,13 +88,8 @@ class TranscriptionService {
         console.log(`No good SGGS match found - no results`);
       }
 
-      // If no results found, refresh the page
       if (results.length === 0) {
-        console.log('No transcription results found, refreshing page...');
-        setTimeout(() => {
-          window.location.reload();
-        }, 1000); // Small delay to show any loading state
-        throw new Error('No results found - page will refresh');
+        console.log('No transcription results found (caller may refresh UI)');
       }
 
       return {
